@@ -1,0 +1,31 @@
+# Secrets - NEVER commit (repo must be public for the hackathon)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Claude Code / agent local config (the PayPal MCP access token lives here)
+.claude/settings.local.json
+.claude/settings.json
+.mcp.json
+
+# Dependencies / build
+node_modules/
+dist/
+build/
+.next/
+__pycache__/
+.venv/
+venv/
+
+# Logs / OS / editor
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local demo state
+data/

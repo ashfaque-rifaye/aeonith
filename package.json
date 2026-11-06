@@ -1,0 +1,35 @@
+{
+  "name": "aeonith",
+  "version": "0.1.0",
+  "description": "Funded requests, sealed competition among provider agents, proof before payment. PayPal holds the money until the job is proven done.",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "mcp": "tsx src/mcp.ts",
+    "sandbox:check": "tsx scripts/sandbox-check.ts",
+    "webhook:register": "tsx scripts/register-webhook.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
+    "@bryntum/scheduler": "npm:@bryntum/scheduler-trial@^7.3.8",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

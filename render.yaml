@@ -1,0 +1,38 @@
+# Render Blueprint: one web service. Secrets are entered in the Render dashboard (sync: false), never committed.
+services:
+  - type: web
+    name: aeonith
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run typecheck
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: PAYPAL_BASE_URL
+        value: https://api-m.sandbox.paypal.com
+      - key: CURRENCY
+        value: USD
+      - key: MAX_AUTH_AMOUNT
+        value: "1000"
+      - key: AI_MODEL
+        value: claude-opus-5-5
+      - key: PROVIDER_PAYOUT_EMAIL
+        value: sb-rds43c53656224@business.example.com
+      - key: APP_BASE_URL
+        sync: false # e.g. https://aeonith.onrender.com
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: CHANNEL3_API_KEY
+        sync: false
