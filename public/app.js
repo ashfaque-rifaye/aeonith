@@ -14,7 +14,7 @@ const usd0 = (c) => (Number(c) % 100 ? usd(c) : `$${(Number(c) / 100).toLocaleSt
 const when = (iso, opts) => (iso ? new Date(iso).toLocaleString("en-US", { timeZone: "America/Chicago", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", ...opts }) + " CT" : "");
 const hhmm = (iso) => new Date(iso).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
 const initials = (n) => String(n || "?").split(/\s+/).map((p) => p[0]).join("").slice(0, 2).toUpperCase();
-const SWATCH = ["#c8f560", "#4ff0b4", "#8b7bff", "#52d6ff", "#ffbf5a", "#ff8fb1"];
+const SWATCH = ["#ff7a3d", "#ffc29a", "#ff4d6d", "#ffd166", "#ffbf5a", "#ff8fb1"];
 const tint = (s) => SWATCH[[...String(s)].reduce((a, c) => a + c.charCodeAt(0), 0) % SWATCH.length];
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -54,15 +54,15 @@ const P = {
 };
 const ic = (name, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${P[name] || P.info}"/></svg>`;
 const CAT = {
-  plumbing: { icon: "drop", tint: "rgba(82,214,255,.35)", label: "Plumbing" },
+  plumbing: { icon: "drop", tint: "rgba(255,209,102,.35)", label: "Plumbing" },
   electrical: { icon: "bolt", tint: "rgba(255,191,90,.35)", label: "Electrical" },
-  hvac: { icon: "fan", tint: "rgba(139,123,255,.4)", label: "Heating & AC" },
-  gutters: { icon: "gutter", tint: "rgba(79,240,180,.35)", label: "Gutters" },
+  hvac: { icon: "fan", tint: "rgba(255,77,109,.4)", label: "Heating & AC" },
+  gutters: { icon: "gutter", tint: "rgba(255,194,154,.35)", label: "Gutters" },
   cleaning: { icon: "broom", tint: "rgba(255,143,177,.35)", label: "Cleaning" },
-  handyman: { icon: "wrench", tint: "rgba(200,245,96,.35)", label: "Handyman" },
-  landscaping: { icon: "leaf", tint: "rgba(79,240,180,.35)", label: "Yard" },
-  moving: { icon: "truck", tint: "rgba(82,214,255,.35)", label: "Moving" },
-  other: { icon: "wrench", tint: "rgba(200,245,96,.35)", label: "Other" },
+  handyman: { icon: "wrench", tint: "rgba(255,122,61,.35)", label: "Handyman" },
+  landscaping: { icon: "leaf", tint: "rgba(255,194,154,.35)", label: "Yard" },
+  moving: { icon: "truck", tint: "rgba(255,209,102,.35)", label: "Moving" },
+  other: { icon: "wrench", tint: "rgba(255,122,61,.35)", label: "Other" },
 };
 const cat = (c) => CAT[c] || CAT.other;
 
@@ -111,7 +111,7 @@ const NAV = [
   { id: "trust", label: "Trust", icon: "shield", href: "#/trust" },
 ];
 function renderNav(active) {
-  $("#side-nav").innerHTML = NAV.map((n) => `<a href="${n.href}" class="${n.id === active ? "active" : ""} ${n.fab ? "cta" : ""}">${ic(n.icon)}<span>${n.label}</span></a>`).join("");
+  $("#side-nav").innerHTML = NAV.filter((n) => !n.fab).map((n) => `<a href="${n.href}" class="${n.id === active ? "active" : ""} ${n.fab ? "cta" : ""}">${ic(n.icon)}<span>${n.label}</span></a>`).join("");
   $("#tabbar").innerHTML = NAV.map((n) => n.fab
     ? `<a href="${n.href}" class="fab" aria-label="${n.label}"><span class="fab-btn">${ic("plus")}</span></a>`
     : `<a href="${n.href}" class="${n.id === active ? "active" : ""}">${ic(n.icon)}<span>${n.label}</span></a>`).join("");
@@ -176,7 +176,7 @@ function viewHome() {
   const returned = requests.reduce((s, r) => s + r.buyers.reduce((t, b) => t + (b.status === "captured" ? (b.authorizedCents ?? 0) - (b.capturedCents ?? 0) : b.status === "voided" ? (b.authorizedCents ?? 0) : 0), 0), 0);
   const blocks = audit.entries.filter((e) => e.action === "blocked").length;
   const active = requests.filter((r) => !["settled", "released"].includes(r.status)).length;
-  const latest = requests.find((r) => !["settled", "released"].includes(r.status)) || requests[0];
+  const latest = requests.find((r) => heldNow(r) > 0) || requests.find((r) => !["settled", "released"].includes(r.status)) || requests[0];
   const st = latest ? sceneState(latest) : "idle";
   const ticker = audit.entries.slice(-14).reverse().map((e) => {
     const k = e.actor.split(":")[0];
@@ -187,24 +187,27 @@ function viewHome() {
   const settledJobs = requests.filter((r) => r.status === "settled");
   const avgSaving = settledJobs.length ? Math.round(settledJobs.reduce((s, r) => s + r.award.buyerSavingCents / Math.max(1, r.award.unitsServed), 0) / settledJobs.length) : 0;
   return `
-  <section class="hero3d">
-    <div class="copy">
-      <div class="eyebrow" data-fade><span class="pulse" style="display:inline-block;margin-right:8px;vertical-align:1px"></span>Agent active · sealed-bid home services</div>
-      <h1 class="display" style="margin-top:16px" data-split>Fair prices. <span class="iri">Paid on proof.</span></h1>
-      <p class="lede" data-fade>Name the job and the most you'll pay. Pros' AI agents compete with <b>sealed bids</b> they can't peek at. PayPal holds your money, and releases it only when the work is <b>proven done</b>.</p>
-      <form class="cmd" id="ask" data-fade>
-        ${ic("spark")}
-        <input name="q" placeholder="Water heater leaking, fix by Friday, max $400…" aria-label="What needs doing?" autocomplete="off" />
-        <button class="btn primary" type="submit">Ask agent ${ic("arrow")}</button>
-      </form>
-      <div class="legend" data-fade><span><i style="background:var(--lime)"></i>your money (held)</span><span><i style="background:var(--amber)"></i>pro agents</span><span><i style="background:var(--violet)"></i>sealed bids</span></div>
-    </div>
-    <div class="stage" id="stage" data-state="${st}" data-agents="${Math.max(3, latest?.commitments.length || 3)}" data-winner="${latest ? winnerIndex(latest) : 0}">
+  <section class="hero-ember">
+    <div class="stage" id="stage" data-state="${st === "idle" ? "held" : st}" data-agents="${Math.max(3, latest?.commitments.length || 3)}" data-winner="${latest ? winnerIndex(latest) : 0}" data-amount="${esc(usd(latest ? (heldNow(latest) || latest.buyers.reduce((s, b) => s + b.limitCents * b.units, 0)) : 0))}" data-label="${esc(st === "idle" ? "your private limit" : st === "settled" ? "paid on proof" : st === "released" ? "released · $0 charged" : "held · not paid")}">
       <div class="hud h1" data-float><span class="dotc">${ic("lock")}</span><div><small>Held in PayPal</small><b>${money(held, { count: true })}</b></div></div>
-      <div class="hud h2" data-float><span class="dotc" style="color:var(--violet);background:rgba(139,123,255,.14)">${ic("hash")}</span><div><small>Sealed bids</small><b class="num">${requests.reduce((s, r) => s + r.commitments.length, 0)}</b></div></div>
-      <div class="hud h3" data-float><span class="dotc" style="color:var(--amber);background:rgba(255,191,90,.14)">${ic("camera")}</span><div><small>Paid only on</small><b>photo proof</b></div></div>
     </div>
-    <div class="bigword" aria-hidden="true" data-parallax="-12">HELD · NOT · PAID</div>
+    <div class="hero-inner">
+      <h1 class="h-title" data-split>Your Money <br>Held Until <br><span class="soft">It's Done</span></h1>
+      <div class="h-right">
+        <p data-fade>Pros' AI agents compete with sealed bids. PayPal holds your payment and releases it only on photo proof.</p>
+        <div class="cta-row" data-fade><a class="btn primary" href="#/new">Post a job</a><a class="btn-round" href="#/jobs" aria-label="See jobs">${ic("arrow")}</a></div>
+        <form class="cmd h-ask" id="ask" data-fade>
+          ${ic("spark")}
+          <input name="q" placeholder="Leaking water heater, max $400…" aria-label="What needs doing?" autocomplete="off" />
+          <button class="btn primary" type="submit" aria-label="Ask agent">${ic("arrow")}</button>
+        </form>
+      </div>
+      <div class="h-bottom">
+        <div class="h-caption" data-fade>Sealed bids, paid on proof</div>
+        <div class="h-social" data-fade><span class="lbl">Held · Sealed · Proven</span><span class="circ" title="PayPal hold">${ic("lock")}</span><span class="circ" title="Sealed bids">${ic("hash")}</span><span class="circ" title="Photo proof">${ic("camera")}</span></div>
+      </div>
+    </div>
+    <div class="wordmark" aria-hidden="true">AEONITH</div>
   </section>
   <div class="ticker" aria-label="Live agent activity"><div class="track-x">${ticker}${ticker}</div></div>
 
@@ -337,7 +340,7 @@ function vault(r) {
   if (r.settlement?.payout) lines.push(["Paid to pro", usd(r.settlement.payout.amountCents)], ["Platform fee", usd(r.settlement.payout.feeCents)]);
   if (r.award && r.status !== "settled") lines.push([r.mode === "solo" ? "You keep" : "Returned at capture", usd(r.buyers.filter((b) => r.award.buyersIn.includes(b.id)).reduce((s, b) => s + (b.authorizedCents ?? 0) - r.award.priceCents * b.units, 0))]);
   return `<div class="vault fade-in">
-    <div class="vault3d" data-vault3d data-state="${sceneState(r)}" data-agents="${Math.max(3, r.commitments.length || 3)}" data-winner="${winnerIndex(r)}"><span class="tag">${esc(state[1])}</span></div>
+    <div class="vault3d" data-vault3d data-amount="${esc(usd(amount))}" data-label="${esc(state[1])}" data-state="${sceneState(r)}" data-agents="${Math.max(3, r.commitments.length || 3)}" data-winner="${winnerIndex(r)}"><span class="tag">${esc(state[1])}</span></div>
     <div class="top">
       <div style="min-width:0"><div class="eyebrow" style="color:var(--lime)">${ic("vault", "inline")} ${esc(eyebrow)}</div>
         <div class="amount">${money(amount, { count: true })}</div><div class="sub">${esc(sub)}</div></div>
@@ -466,7 +469,7 @@ function viewNew() {
     <div class="card fade-in">
       <label class="field">Describe it in your own words<textarea class="input" id="intake" rows="4">${esc(ui.text ?? "Water heater is leaking in my garage, need it fixed by Friday, max $400, Austin 78704. Licensed plumber only.")}</textarea></label>
       <div class="row" style="margin-top:12px"><button class="btn primary" id="parse">${ic("spark")}Let the agent fill it in</button><span class="small muted mono" id="src">${d ? (d.source === "ai" ? "parsed by claude" : "parsed by offline rules") : ""}</span></div>
-      ${d ? `<div class="ai-box" style="margin-top:14px"><div class="small" style="font-weight:600;margin-bottom:8px;color:#cfc8ff">${ic("spark", "inline")} Agent extracted: edit anything</div>
+      ${d ? `<div class="ai-box" style="margin-top:14px"><div class="small" style="font-weight:600;margin-bottom:8px;color:#ffd0d8">${ic("spark", "inline")} Agent extracted: edit anything</div>
         <div class="chips"><span class="chip">${cat(d.category).label}</span>${d.limitDollars ? `<span class="chip lime">max ${usd0(d.limitDollars * 100)}</span>` : `<span class="chip warn">no limit found</span>`}${d.licensed ? `<span class="chip">licensed</span>` : ""}${d.completeBy ? `<span class="chip">by ${esc(d.completeBy)}</span>` : ""}${d.zip ? `<span class="chip">${esc(d.zip)}</span>` : ""}${d.units > 1 ? `<span class="chip">${d.units} homes</span>` : ""}</div></div>` : ""}
     </div>
     <form class="card fade-in" id="draft" style="${d ? "" : "display:none"}">
@@ -594,6 +597,7 @@ async function render({ animate = true } = {}) {
   const { name, id } = route();
   const view = $("#view");
   renderNav(name === "job" ? "jobs" : name);
+  document.body.classList.toggle("is-home", name === "home");
   document.body.classList.remove("has-cta");
   $(".mobile-cta")?.remove();
   if (name === "home") { view.innerHTML = viewHome(); wireHome(); }
@@ -636,7 +640,7 @@ async function mountScenes(root) {
     if (!sceneMod.webglOK()) throw new Error("no webgl");
     for (const h of hosts) {
       if (!document.body.contains(h)) continue;
-      const v = sceneMod.createVault(h, { state: h.dataset.state, agents: Number(h.dataset.agents), winner: Number(h.dataset.winner), compact: h.hasAttribute("data-vault3d") });
+      const v = sceneMod.createVault(h, { amount: h.dataset.amount, label: h.dataset.label, state: h.dataset.state, agents: Number(h.dataset.agents), winner: Number(h.dataset.winner), compact: h.hasAttribute("data-vault3d") });
       if (h.dataset.state === "bidding") setTimeout(() => v.burst(6), 400);
       scenes.push(v);
     }
@@ -750,6 +754,7 @@ function wireNew() {
 }
 
 // ---------- boot ----------
+addEventListener("scroll", () => $("#topnav")?.classList.toggle("scrolled", scrollY > 40), { passive: true });
 async function boot() {
   installPointerFX();
   initSmoothScroll();
