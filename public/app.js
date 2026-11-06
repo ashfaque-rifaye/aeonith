@@ -1,5 +1,8 @@
 // Aeonith web app: hash router, no framework. All money logic is server-side; this file renders and calls the API.
+import { animateView, initSmoothScroll, installPointerFX, scrollTop } from "/motion.js";
 const $ = (s, el = document) => el.querySelector(s);
+let sceneMod = null; // three.js vault, loaded lazily
+const scenes = [];
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const usd = (c) => `$${(Number(c || 0) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 /** Big money with dimmed cents (Cryptfy-style). */
@@ -92,7 +95,7 @@ async function act(btn, fn, { rerender = true } = {}) {
     toast(e.message, 6500);
   } finally {
     if (btn && document.body.contains(btn)) { btn.disabled = false; btn.innerHTML = html; }
-    if (rerender) { await load(); render(); }
+    if (rerender) { await load(); render({ animate: false }); }
   }
 }
 async function load() {
@@ -134,6 +137,16 @@ const STATUS = {
   settled: ["Paid on proof", "ok"],
   released: ["Released · $0", "warn"],
 };
+/** Map a job's real status onto the 3D vault's visual state. */
+const sceneState = (r) => {
+  if (r.status === "settled") return "settled";
+  if (r.status === "released") return "released";
+  if (r.status === "proving") return "proving";
+  if (r.status === "awarded") return "awarded";
+  if (["bidding", "revealing"].includes(r.status) && r.commitments.length) return "bidding";
+  return r.buyers.some((b) => b.status === "held") ? "held" : "idle";
+};
+const winnerIndex = (r) => Math.max(0, r.award ? r.commitments.findIndex((c) => c.providerId === r.award.providerId) : 0);
 const statusChip = (r) => `<span class="chip ${STATUS[r.status]?.[1] ?? ""}">${r.status === "bidding" ? `<span class="pulse"></span>` : ""}${STATUS[r.status]?.[0] ?? esc(r.status)}</span>`;
 const FLOW = [
   ["Funded", "lock", (r) => funded(r).length > 0],
@@ -164,55 +177,70 @@ function viewHome() {
   const blocks = audit.entries.filter((e) => e.action === "blocked").length;
   const active = requests.filter((r) => !["settled", "released"].includes(r.status)).length;
   const latest = requests.find((r) => !["settled", "released"].includes(r.status)) || requests[0];
+  const st = latest ? sceneState(latest) : "idle";
+  const ticker = audit.entries.slice(-14).reverse().map((e) => {
+    const k = e.actor.split(":")[0];
+    const d = e.data || {};
+    const extra = d.amount ? ` $${d.amount}` : d.priceCents ? ` ${usd(d.priceCents)}` : d.hash ? ` ${String(d.hash).slice(0, 12)}…` : "";
+    return `<span><b class="${KIND[k] || ""}">${esc(k)}</b>${esc(LABEL[e.action] || e.action)}${esc(extra)}</span>`;
+  }).join("");
+  const settledJobs = requests.filter((r) => r.status === "settled");
+  const avgSaving = settledJobs.length ? Math.round(settledJobs.reduce((s, r) => s + r.award.buyerSavingCents / Math.max(1, r.award.unitsServed), 0) / settledJobs.length) : 0;
   return `
-  <div class="agentbar fade-in">
-    <div class="who"><span class="pulse"></span>AGENT ACTIVE</div>
-    <div class="small muted hide-sm">Watching ${requests.length} jobs · ${audit.verify.length} signed events</div>
-    <div class="stats">
-      <div><small>Open jobs</small><b class="num">${active}</b></div>
-      <div><small>Held in PayPal</small><b>${money(held, { count: true })}</b></div>
-      <div><small>Returned</small><b>${money(returned, { count: true })}</b></div>
-      <div><small>Policy blocks</small><b class="num" style="color:${blocks ? "var(--red)" : "inherit"}">${blocks}</b></div>
-    </div>
-  </div>
-  <div class="bento">
-    <section class="card b-hero fade-in">
-      <div class="orb" aria-hidden="true"></div>
-      <div class="eyebrow">Sealed-bid home services · PayPal escrow</div>
-      <h1 class="display" style="margin-top:12px">Fair prices.<br><span class="grad">Paid on proof.</span></h1>
-      <p>Say what needs fixing and the most you'll pay. Pros' AI agents compete with <b>sealed bids</b>. PayPal holds your money until the job is <b>proven done</b>.</p>
-      <form class="cmd" id="ask">
+  <section class="hero3d">
+    <div class="copy">
+      <div class="eyebrow" data-fade><span class="pulse" style="display:inline-block;margin-right:8px;vertical-align:1px"></span>Agent active · sealed-bid home services</div>
+      <h1 class="display" style="margin-top:16px" data-split>Fair prices. <span class="iri">Paid on proof.</span></h1>
+      <p class="lede" data-fade>Name the job and the most you'll pay. Pros' AI agents compete with <b>sealed bids</b> they can't peek at. PayPal holds your money, and releases it only when the work is <b>proven done</b>.</p>
+      <form class="cmd" id="ask" data-fade>
         ${ic("spark")}
         <input name="q" placeholder="Water heater leaking, fix by Friday, max $400…" aria-label="What needs doing?" autocomplete="off" />
-        <button class="btn primary" type="submit">Ask ${ic("arrow")}</button>
+        <button class="btn primary" type="submit">Ask agent ${ic("arrow")}</button>
       </form>
-      <div class="pills"><span class="chip">${ic("lock")}Held, not paid</span><span class="chip">${ic("hash")}Commit-reveal bids</span><span class="chip">${ic("camera")}Proof before payment</span><span class="chip">${ic("shield")}Policy-gated</span></div>
-    </section>
-    <section class="card b-vault vaultmini fade-in">
-      <div class="eyebrow">In PayPal right now</div>
-      <div class="big">${money(held, { count: true })}</div>
-      <div class="small muted">Reserved across ${requests.filter((r) => heldNow(r) > 0).length} jobs. Not paid to anyone yet.</div>
-      <div class="bar" style="margin-top:14px"><i style="width:${held + returned ? Math.max(6, (held / (held + returned)) * 100) : 6}%"></i></div>
-      <div class="row-between small" style="margin-top:8px"><span class="muted">held</span><span class="muted">returned ${usd0(returned)}</span></div>
-      <div style="margin-top:auto;padding-top:16px">${latest ? `<a class="btn block" href="#/job/${latest.id}">Open latest job ${ic("arrow")}</a>` : ""}</div>
-    </section>
-    <section class="b-cats fade-in">
-      <div class="row-between" style="margin:6px 2px 10px"><h3>Start a job</h3><span class="small muted">licensed pros · sealed bids</span></div>
-      <div class="cats">${["plumbing", "electrical", "hvac", "gutters", "cleaning", "handyman"].map((c) =>
-        `<button class="cat" data-cat="${c}" style="--tint:${cat(c).tint}"><span class="ico">${ic(cat(c).icon)}</span><span><b>${cat(c).label}</b><small>sealed bids</small></span></button>`).join("")}</div>
-    </section>
-    <section class="card b-jobs fade-in">
+      <div class="legend" data-fade><span><i style="background:var(--lime)"></i>your money (held)</span><span><i style="background:var(--amber)"></i>pro agents</span><span><i style="background:var(--violet)"></i>sealed bids</span></div>
+    </div>
+    <div class="stage" id="stage" data-state="${st}" data-agents="${Math.max(3, latest?.commitments.length || 3)}" data-winner="${latest ? winnerIndex(latest) : 0}">
+      <div class="hud h1" data-float><span class="dotc">${ic("lock")}</span><div><small>Held in PayPal</small><b>${money(held, { count: true })}</b></div></div>
+      <div class="hud h2" data-float><span class="dotc" style="color:var(--violet);background:rgba(139,123,255,.14)">${ic("hash")}</span><div><small>Sealed bids</small><b class="num">${requests.reduce((s, r) => s + r.commitments.length, 0)}</b></div></div>
+      <div class="hud h3" data-float><span class="dotc" style="color:var(--amber);background:rgba(255,191,90,.14)">${ic("camera")}</span><div><small>Paid only on</small><b>photo proof</b></div></div>
+    </div>
+    <div class="bigword" aria-hidden="true" data-parallax="-12">HELD · NOT · PAID</div>
+  </section>
+  <div class="ticker" aria-label="Live agent activity"><div class="track-x">${ticker}${ticker}</div></div>
+
+  <div class="sec-head"><div><div class="eyebrow">Live</div><h2 style="margin-top:6px">The market, <span class="grad">right now</span></h2></div><span class="chip ${audit.verify.ok ? "ok" : "bad"}">${ic("shield")}${audit.verify.length} events · chain ${audit.verify.ok ? "intact" : "broken"}</span></div>
+  <div class="kpis" data-stagger>
+    <div class="card kpi" data-tilt><small>Open jobs</small><span class="v num">${active}</span><div class="sub">${requests.length} total</div></div>
+    <div class="card kpi" data-tilt><small>Held in PayPal</small><span class="v">${money(held, { count: true })}</span><div class="sub">reserved, not paid</div></div>
+    <div class="card kpi" data-tilt><small>Returned to buyers</small><span class="v">${money(returned, { count: true })}</span><div class="sub">${avgSaving ? `avg ${usd0(avgSaving)} below limit` : "never above the hold"}</div></div>
+    <div class="card kpi" data-tilt><small>Agent overreach blocked</small><span class="v num" style="color:${blocks ? "var(--red)" : "inherit"}">${blocks}</span><div class="sub">policy gate on every call</div></div>
+  </div>
+
+  <div class="sec-head"><div><div class="eyebrow">Start a job</div><h2 style="margin-top:6px">What needs <span class="grad">fixing?</span></h2></div><span class="small muted">licensed pros · sealed bids · paid on proof</span></div>
+  <div class="cats" data-stagger>${["plumbing", "electrical", "hvac", "gutters", "cleaning", "handyman"].map((c) =>
+    `<button class="cat" data-cat="${c}" data-tilt style="--tint:${cat(c).tint}"><span class="ico">${ic(cat(c).icon)}</span><span><b>${cat(c).label}</b><small>sealed bids</small></span></button>`).join("")}</div>
+
+  <div class="home-grid" style="margin-top:14px">
+    <section class="card" data-reveal>
       <div class="card-head"><h3>Your jobs</h3><a class="small muted" href="#/jobs">View all →</a></div>
       <div class="jobs">${requests.length ? requests.slice(0, 5).map(jobRow).join("") : `<div class="empty">No jobs yet.</div>`}</div>
     </section>
-    <section class="card b-feed fade-in">
+    <section class="card" data-reveal>
       <div class="card-head"><h3>${ic("terminal", "inline")} Agent console</h3><span class="chip ${audit.verify.ok ? "ok" : "bad"}">${audit.verify.ok ? "chain ✓" : "broken"}</span></div>
       <div class="feed">${feedLines(audit.entries, 9) || `<div class="muted">idle</div>`}</div>
       <div class="caret small muted" style="margin-top:8px;font-family:var(--mono)">listening</div>
     </section>
-  </div>`;
-}
+  </div>
 
+  <div class="sec-head"><div><div class="eyebrow">How it works</div><h2 style="margin-top:6px">Compete · hold · prove · <span class="grad">pay</span></h2></div></div>
+  <div class="howgrid" data-stagger>
+    <div class="card how" data-tilt><span class="icon3">${ic("lock")}</span><span class="n">01 · HOLD</span><h3>One PayPal hold</h3><p>Approve your limit once. It's reserved in PayPal, not paid to anyone, and pros never see the number.</p></div>
+    <div class="card how" data-tilt><span class="icon3">${ic("hash")}</span><span class="n">02 · COMPETE</span><h3>Sealed bids</h3><p>Pros' agents commit a SHA-256 fingerprint. Nobody, including us, can read or change a bid until it closes.</p></div>
+    <div class="card how" data-tilt><span class="icon3">${ic("camera")}</span><span class="n">03 · PROVE</span><h3>Photo proof</h3><p>The pro shows the finished job with a one-time code in frame. Code checks freshness; AI vision checks the work.</p></div>
+    <div class="card how" data-tilt><span class="icon3">${ic("receipt")}</span><span class="n">04 · PAY</span><h3>Paid on proof</h3><p>A policy gate allows a capture only at the final price and never above your hold. The rest returns to you.</p></div>
+  </div>
+  `;
+}
 function jobRow(r) {
   const c = cat(r.category);
   const fu = fundedUnits(r);
@@ -309,12 +337,12 @@ function vault(r) {
   if (r.settlement?.payout) lines.push(["Paid to pro", usd(r.settlement.payout.amountCents)], ["Platform fee", usd(r.settlement.payout.feeCents)]);
   if (r.award && r.status !== "settled") lines.push([r.mode === "solo" ? "You keep" : "Returned at capture", usd(r.buyers.filter((b) => r.award.buyersIn.includes(b.id)).reduce((s, b) => s + (b.authorizedCents ?? 0) - r.award.priceCents * b.units, 0))]);
   return `<div class="vault fade-in">
+    <div class="vault3d" data-vault3d data-state="${sceneState(r)}" data-agents="${Math.max(3, r.commitments.length || 3)}" data-winner="${winnerIndex(r)}"><span class="tag">${esc(state[1])}</span></div>
     <div class="top">
       <div style="min-width:0"><div class="eyebrow" style="color:var(--lime)">${ic("vault", "inline")} ${esc(eyebrow)}</div>
         <div class="amount">${money(amount, { count: true })}</div><div class="sub">${esc(sub)}</div></div>
       <div class="ring" aria-hidden="true"><svg viewBox="0 0 92 92"><circle class="trackc" cx="46" cy="46" r="38"/><circle class="fill" cx="46" cy="46" r="38" stroke-dasharray="${C}" stroke-dashoffset="${C}" data-offset="${C * (1 - pct)}"/></svg><div class="lbl">${ringLbl}</div></div>
     </div>
-    <span class="state">${ic(state[0])}${esc(state[1])}</span>
     <div class="track">${t(0, "You hold", "lock")}${t(1, "Work proven", "camera")}${t(2, "Pro paid", "receipt")}</div>
     ${lines.length ? `<div class="lines">${lines.map(([a, b]) => `<div><span>${a}</span><b>${b}</b></div>`).join("")}</div>` : ""}
     ${next ? `<button class="btn primary block" data-next>${esc(next.label)} ${ic("arrow")}</button>` : ""}
@@ -361,7 +389,7 @@ function bidsCard(r) {
     const row = r.award?.table.find((t) => t.providerId === c.providerId);
     const win = r.award?.providerId === c.providerId;
     const o = rev?.offer;
-    return `<div class="bid ${win ? "win" : r.award ? "out" : ""} ${rev && animate ? "reveal-anim" : ""}" style="animation-delay:${i * 120}ms">
+    return `<div class="bid ${win ? "win" : r.award ? "out" : ""} ${rev && animate ? "reveal-anim" : ""}" data-tilt style="animation-delay:${i * 120}ms">
       ${win ? `<span class="ribbon">WINNER</span>` : ""}
       <div class="head"><span class="avatar" style="background:${tint(c.providerName)}">${esc(initials(c.providerName))}</span>
         <div style="min-width:0"><b>${esc(c.providerName)}</b><div class="small muted mono">ai agent · simulated</div></div></div>
@@ -560,7 +588,7 @@ function route() {
   const [name, id] = h.split("/");
   return { name, id };
 }
-async function render() {
+async function render({ animate = true } = {}) {
   ui.timers.forEach(clearInterval);
   ui.timers = [];
   const { name, id } = route();
@@ -592,6 +620,29 @@ async function render() {
   else { location.hash = "#/home"; return; }
   animateNumbers(view);
   scrambleHashes(view);
+  view.querySelectorAll(".detail .col > .card, .jobs-page .card").forEach((c, i) => { if (i > 0) c.setAttribute("data-reveal", ""); });
+  if (animate) animateView(view);
+  else view.querySelectorAll(".fade-in").forEach((el) => el.classList.remove("fade-in"));
+  mountScenes(view);
+}
+
+/** Mount the three.js vault into every visible [data-vault3d] / #stage host. Lazy-loads three.js once. */
+async function mountScenes(root) {
+  scenes.splice(0).forEach((s) => s.destroy());
+  const hosts = [...root.querySelectorAll("#stage, [data-vault3d]")].filter((h) => h.offsetParent !== null);
+  if (!hosts.length) return;
+  try {
+    sceneMod ??= await import("/scene.js");
+    if (!sceneMod.webglOK()) throw new Error("no webgl");
+    for (const h of hosts) {
+      if (!document.body.contains(h)) continue;
+      const v = sceneMod.createVault(h, { state: h.dataset.state, agents: Number(h.dataset.agents), winner: Number(h.dataset.winner), compact: h.hasAttribute("data-vault3d") });
+      if (h.dataset.state === "bidding") setTimeout(() => v.burst(6), 400);
+      scenes.push(v);
+    }
+  } catch {
+    hosts.forEach((h) => h.classList.add("fallback"));
+  }
 }
 
 function wireHome() {
@@ -700,6 +751,8 @@ function wireNew() {
 
 // ---------- boot ----------
 async function boot() {
+  installPointerFX();
+  initSmoothScroll();
   try { health = await api("/api/health"); } catch { health = null; }
   const pills = envPills();
   $("#env").innerHTML = pills;
@@ -712,5 +765,5 @@ async function boot() {
   await load();
   await render();
 }
-addEventListener("hashchange", async () => { await load(); await render(); scrollTo({ top: 0 }); });
+addEventListener("hashchange", async () => { await load(); await render(); scrollTop(); });
 boot().catch((e) => toast(e.message, 8000));

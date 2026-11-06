@@ -40,6 +40,10 @@ app.use("/api/webhooks/paypal", express.json({ limit: "256kb" }));
 app.use(express.json({ limit: "12mb" })); // proof photos arrive base64-encoded
 app.use(express.static(fileURLToPath(new URL("../public", import.meta.url))));
 app.use("/vendor/bryntum", express.static(fileURLToPath(new URL("../node_modules/@bryntum/scheduler", import.meta.url))));
+// Front-end libraries served from node_modules (pinned in package.json), so the demo never depends on a CDN.
+app.use("/vendor/three", express.static(fileURLToPath(new URL("../node_modules/three", import.meta.url))));
+app.use("/vendor/gsap", express.static(fileURLToPath(new URL("../node_modules/gsap", import.meta.url))));
+app.use("/vendor/lenis", express.static(fileURLToPath(new URL("../node_modules/lenis/dist", import.meta.url))));
 
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown> | unknown) => (req: Request, res: Response, next: NextFunction) =>
   Promise.resolve(fn(req, res)).catch(next);
