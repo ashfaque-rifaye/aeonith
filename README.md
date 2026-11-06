@@ -45,14 +45,37 @@ Every step is written to a **hash-chained audit log**. Editing any past entry br
   Every AI step has a deterministic fallback, so the app runs without a key.
 - **Model Context Protocol** TypeScript SDK (provider-facing MCP server)
 - **Bryntum Scheduler** (booked jobs view; trial package, so it shows a watermark)
+- **three.js** (real-time 3D claw that holds the card and follows the job's state), **GSAP + ScrollTrigger** (motion), **Lenis** (smooth scroll)
 - Node 22, TypeScript, Express 5, Zod 4
+
+## Design
+A full-bleed ember gradient hero with a live 3D claw **holding your card**: the product metaphor, *money held, not paid*. The claw follows the real job status:
+
+| Job state | What the claw does |
+|---|---|
+| No hold yet | Hangs open |
+| Money held | Grips the card |
+| Bidding | Sparks circle it as sealed bids arrive |
+| Checking proof | An amber scan line sweeps the card |
+| Paid | Opens and drops the card to the pro |
+| Released | The card slides back out |
+
+The money card on each job page is a mini version of the same scene.
+
+- Top navigation on desktop; a floating tab bar and a sticky next-step button on phones.
+- The 3D scene pauses when it's off screen or in a background tab.
+- Falls back to a flat glow without WebGL.
+- Respects reduced-motion settings.
+
+Visual direction was inspired by the "Daily Bank" fintech concept by Nixtio on Dribbble; all artwork and code here are original.
 
 ## Run it
 ```bash
 npm install
 cp .env.example .env      # fill PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET (sandbox), ADMIN_TOKEN; ANTHROPIC_API_KEY optional
 npm run dev               # http://localhost:3000
-npm test                  # 14 tests: clearing, commit–reveal, policy gate, audit chain, proof, full solo + group flows
+npm test                  # 15 tests: clearing, commit–reveal, policy gate, audit chain, proof, reauthorize, full solo + group flows
+npm run sandbox:check     # confirms your PayPal sandbox keys work (prints no secrets)
 ```
 Without sandbox credentials the app runs in a clearly labelled **SIMULATED PayPal** mode, for local development only. Delete `data/state.json` to reset the demo.
 
