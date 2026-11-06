@@ -2,85 +2,38 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0e3b36" />
   <title>Aeonith</title>
-  <meta name="description" content="Funded requests, sealed competition, proof before payment. Built on the PayPal sandbox." />
+  <meta name="description" content="Fair prices, paid on proof. Pros compete with sealed bids; PayPal holds your money until the job is proven done." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Instrument+Serif:ital@1&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <header class="top">
-    <div class="brand">
-      <span class="logo" aria-hidden="true">◆</span>
-      <div>
-        <strong>Aeonith</strong>
-        <small>Compete → hold → prove → pay</small>
-      </div>
+  <div class="shell">
+    <aside class="side" aria-label="Main navigation">
+      <a class="brand" href="#/home">
+        <span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2 3 7v10l9 5 9-5V7z" fill="currentColor" opacity=".18"/><path d="M12 2 3 7l9 5 9-5zM12 12v10" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/></svg></span>
+        <span><strong>Aeonith</strong><small>Paid on proof</small></span>
+      </a>
+      <nav class="side-nav" id="side-nav"></nav>
+      <div class="side-foot" id="env"></div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <a class="brand compact" href="#/home"><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2 3 7v10l9 5 9-5V7z" fill="currentColor" opacity=".18"/><path d="M12 2 3 7l9 5 9-5zM12 12v10" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/></svg></span><strong>Aeonith</strong></a>
+        <div class="env-pills" id="env-top"></div>
+      </header>
+      <main id="view" tabindex="-1"></main>
+      <footer class="foot">Sandbox only · provider agents are simulated · not legal advice</footer>
     </div>
-    <div class="badges" id="badges"></div>
-  </header>
+  </div>
 
-  <nav class="tabs" role="tablist">
-    <button role="tab" data-tab="solo" class="active">Solo job</button>
-    <button role="tab" data-tab="together">Together</button>
-    <button role="tab" data-tab="new">New request</button>
-    <button role="tab" data-tab="providers">Provider view</button>
-    <button role="tab" data-tab="audit">Audit trail</button>
-  </nav>
-
-  <main>
-    <section id="tab-solo" class="tab active"></section>
-    <section id="tab-together" class="tab"></section>
-
-    <section id="tab-new" class="tab">
-      <div class="card">
-        <h2>Tell your agent what you need</h2>
-        <p class="muted">Say the job and the most you'd pay. Your limit stays private: providers never see it.</p>
-        <textarea id="intake" rows="3">Water heater is leaking in my garage, need it fixed by Friday, max $400, Austin 78704. Licensed plumber only.</textarea>
-        <div class="row"><button class="primary" id="parse">Ask the AI agent</button><span id="intake-src" class="muted"></span></div>
-        <form id="draft" class="grid hidden">
-          <label>Job <input name="title" required /></label>
-          <label>Category <select name="category">
-            <option>plumbing</option><option>electrical</option><option>hvac</option><option>gutters</option><option>cleaning</option><option>handyman</option><option>landscaping</option><option>moving</option><option>other</option>
-          </select></label>
-          <label class="wide">Details <input name="description" /></label>
-          <label>ZIP <input name="zip" /></label>
-          <label>Your private limit ($) <input name="limitDollars" type="number" min="1" step="1" required /></label>
-          <label>Homes / jobs <input name="units" type="number" min="1" value="1" /></label>
-          <label>Start by <input name="completeBy" type="date" /></label>
-          <label>Min. warranty (months) <input name="minWarrantyMonths" type="number" min="0" value="0" /></label>
-          <label class="check"><input name="licensed" type="checkbox" /> Licensed pro required</label>
-          <label>Mode <select name="mode"><option value="solo">Solo</option><option value="together">Together (invite neighbours)</option></select></label>
-          <label>Your name <input name="buyerName" value="You" /></label>
-          <div class="wide row"><button class="primary" type="submit">Create funded request</button></div>
-        </form>
-      </div>
-    </section>
-
-    <section id="tab-providers" class="tab">
-      <div class="card">
-        <h2>What provider agents see</h2>
-        <p class="muted">This is the entire Offer Protocol view (<code>/protocol/v1/requests</code>, also an MCP server). There is no field that can carry a buyer's limit.</p>
-        <pre id="signals" class="code"></pre>
-      </div>
-      <div class="card">
-        <h2>Booked jobs</h2>
-        <p class="muted">Winning providers' job slots (Bryntum Scheduler).</p>
-        <div id="scheduler"></div>
-      </div>
-    </section>
-
-    <section id="tab-audit" class="tab">
-      <div class="card">
-        <h2>Tamper-evident audit trail</h2>
-        <p class="muted">Every agent action, bid, policy decision and PayPal call. Each entry includes the hash of the one before it.</p>
-        <div id="audit-verify"></div>
-        <div id="audit" class="audit"></div>
-      </div>
-    </section>
-  </main>
-
+  <nav class="tabbar" id="tabbar" aria-label="Main navigation"></nav>
   <div id="toast" role="status" aria-live="polite"></div>
-  <footer>Sandbox only · simulated provider agents · not legal advice · <a href="https://github.com/" id="repo">source</a></footer>
   <script type="module" src="/app.js"></script>
 </body>
 </html>
