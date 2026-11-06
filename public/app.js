@@ -1,14 +1,21 @@
-// Aeonith web app. Hash router, no framework. All money logic lives on the server; this file only renders and calls the API.
+// Aeonith web app: hash router, no framework. All money logic is server-side; this file renders and calls the API.
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-const usd = (c, dp = 2) => `$${(Number(c || 0) / 100).toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp })}`;
-const usd0 = (c) => usd(c, Number(c) % 100 ? 2 : 0);
+const usd = (c) => `$${(Number(c || 0) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+/** Big money with dimmed cents (Cryptfy-style). */
+const money = (c, { count = false } = {}) => {
+  const [i, d] = usd(c).split(".");
+  return `<span class="num"${count ? ` data-count="${Number(c) || 0}"` : ""}>${i}<span class="dec">.${d}</span></span>`;
+};
+const usd0 = (c) => (Number(c) % 100 ? usd(c) : `$${(Number(c) / 100).toLocaleString("en-US")}`);
 const when = (iso, opts) => (iso ? new Date(iso).toLocaleString("en-US", { timeZone: "America/Chicago", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", ...opts }) + " CT" : "");
+const hhmm = (iso) => new Date(iso).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
 const initials = (n) => String(n || "?").split(/\s+/).map((p) => p[0]).join("").slice(0, 2).toUpperCase();
-const PASTELS = ["var(--mint)", "var(--peach)", "var(--lilac)", "var(--sky)", "var(--rose)", "var(--butter)"];
-const tint = (s) => PASTELS[[...String(s)].reduce((a, c) => a + c.charCodeAt(0), 0) % PASTELS.length];
+const SWATCH = ["#c8f560", "#4ff0b4", "#8b7bff", "#52d6ff", "#ffbf5a", "#ff8fb1"];
+const tint = (s) => SWATCH[[...String(s)].reduce((a, c) => a + c.charCodeAt(0), 0) % SWATCH.length];
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-// ---------- icons (inline SVG, stroke-based) ----------
+// ---------- icons ----------
 const P = {
   home: "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z",
   jobs: "M4 7h16v12H4zM9 7V5h6v2M4 12h16",
@@ -21,7 +28,7 @@ const P = {
   q: "M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17.5v.5",
   back: "M15 5l-7 7 7 7",
   camera: "M4 8h3l2-2h6l2 2h3v11H4zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8",
-  spark: "M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6",
+  spark: "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z",
   hand: "M7 11V6a1.5 1.5 0 0 1 3 0v5M10 10V4.5a1.5 1.5 0 0 1 3 0V10M13 10V5.5a1.5 1.5 0 0 1 3 0V12M16 9.5a1.5 1.5 0 0 1 3 0V14a7 7 0 0 1-7 7h-1a6 6 0 0 1-5-2.7L3.5 15a1.6 1.6 0 0 1 2.6-1.8L7 14.5",
   drop: "M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z",
   bolt: "M13 2 4 14h7l-1 8 9-12h-7z",
@@ -38,25 +45,29 @@ const P = {
   hash: "M5 9h14M5 15h14M10 3 8 21M16 3l-2 18",
   upload: "M12 16V4M7 9l5-5 5 5M4 20h16",
   receipt: "M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6",
+  terminal: "M4 5h16v14H4zM8 10l2 2-2 2M12 14h4",
+  arrow: "M5 12h14M13 6l6 6-6 6",
+  vault: "M4 5h16v14H4zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6M12 9V7M12 17v-2M4 9h2M4 15h2",
 };
-const ic = (name, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${P[name] || P.info}"/></svg>`;
+const ic = (name, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${P[name] || P.info}"/></svg>`;
 const CAT = {
-  plumbing: { icon: "drop", tint: "var(--sky)", label: "Plumbing" },
-  electrical: { icon: "bolt", tint: "var(--butter)", label: "Electrical" },
-  hvac: { icon: "fan", tint: "var(--lilac)", label: "Heating & AC" },
-  gutters: { icon: "gutter", tint: "var(--mint)", label: "Gutters" },
-  cleaning: { icon: "broom", tint: "var(--rose)", label: "Cleaning" },
-  handyman: { icon: "wrench", tint: "var(--peach)", label: "Handyman" },
-  landscaping: { icon: "leaf", tint: "var(--mint)", label: "Yard" },
-  moving: { icon: "truck", tint: "var(--sky)", label: "Moving" },
-  other: { icon: "wrench", tint: "var(--peach)", label: "Other" },
+  plumbing: { icon: "drop", tint: "rgba(82,214,255,.35)", label: "Plumbing" },
+  electrical: { icon: "bolt", tint: "rgba(255,191,90,.35)", label: "Electrical" },
+  hvac: { icon: "fan", tint: "rgba(139,123,255,.4)", label: "Heating & AC" },
+  gutters: { icon: "gutter", tint: "rgba(79,240,180,.35)", label: "Gutters" },
+  cleaning: { icon: "broom", tint: "rgba(255,143,177,.35)", label: "Cleaning" },
+  handyman: { icon: "wrench", tint: "rgba(200,245,96,.35)", label: "Handyman" },
+  landscaping: { icon: "leaf", tint: "rgba(79,240,180,.35)", label: "Yard" },
+  moving: { icon: "truck", tint: "rgba(82,214,255,.35)", label: "Moving" },
+  other: { icon: "wrench", tint: "rgba(200,245,96,.35)", label: "Other" },
 };
 const cat = (c) => CAT[c] || CAT.other;
 
 // ---------- state / api ----------
 let health = null;
 let requests = [];
-const draftState = { draft: null };
+let audit = { verify: { ok: true, length: 0 }, entries: [] };
+const ui = { draft: null, text: undefined, justRevealed: null, timers: [] };
 
 function toast(msg, ms = 3600) {
   const t = $("#toast");
@@ -75,7 +86,7 @@ const post = (path, data, headers) => api(path, { method: "POST", body: JSON.str
 async function act(btn, fn, { rerender = true } = {}) {
   const html = btn?.innerHTML;
   try {
-    if (btn) { btn.disabled = true; btn.innerHTML = `<span>Working…</span>`; }
+    if (btn) { btn.disabled = true; btn.innerHTML = `<span class="caret">Working</span>`; }
     await fn();
   } catch (e) {
     toast(e.message, 6500);
@@ -85,20 +96,19 @@ async function act(btn, fn, { rerender = true } = {}) {
   }
 }
 async function load() {
-  requests = await api("/api/requests");
+  [requests, audit] = await Promise.all([api("/api/requests"), api("/api/audit").catch(() => audit)]);
 }
 
 // ---------- navigation ----------
 const NAV = [
   { id: "home", label: "Home", icon: "home", href: "#/home" },
-  { id: "jobs", label: "My jobs", icon: "jobs", href: "#/jobs" },
+  { id: "jobs", label: "Jobs", icon: "jobs", href: "#/jobs" },
   { id: "new", label: "Post a job", icon: "plus", href: "#/new", fab: true },
   { id: "pros", label: "Pros", icon: "pros", href: "#/pros" },
-  { id: "trust", label: "Trust log", icon: "shield", href: "#/trust" },
+  { id: "trust", label: "Trust", icon: "shield", href: "#/trust" },
 ];
 function renderNav(active) {
-  $("#side-nav").innerHTML = NAV.map((n) =>
-    `<a href="${n.href}" class="${n.id === active ? "active" : ""} ${n.fab ? "cta" : ""}">${ic(n.icon)}<span>${n.label}</span></a>`).join("");
+  $("#side-nav").innerHTML = NAV.map((n) => `<a href="${n.href}" class="${n.id === active ? "active" : ""} ${n.fab ? "cta" : ""}">${ic(n.icon)}<span>${n.label}</span></a>`).join("");
   $("#tabbar").innerHTML = NAV.map((n) => n.fab
     ? `<a href="${n.href}" class="fab" aria-label="${n.label}"><span class="fab-btn">${ic("plus")}</span></a>`
     : `<a href="${n.href}" class="${n.id === active ? "active" : ""}">${ic(n.icon)}<span>${n.label}</span></a>`).join("");
@@ -107,91 +117,117 @@ function envPills() {
   if (!health) return "";
   const pp = health.paypal === "sandbox";
   const ai = health.ai.startsWith("claude");
-  return `<span class="chip ${pp ? "ok" : "warn"}" title="PayPal mode">${ic("lock")}${pp ? "PayPal sandbox" : "PayPal simulated"}</span>
-    <span class="chip ${ai ? "ok" : "warn"}" title="${esc(health.ai)}">${ic("spark")}${ai ? "Claude on" : "AI offline"}</span>`;
+  return `<span class="chip ${pp ? "ok" : "warn"}">${ic("lock")}${pp ? "PayPal sandbox" : "PayPal simulated"}</span>
+    <span class="chip ${ai ? "violet" : "warn"}" title="${esc(health.ai)}">${ic("spark")}${ai ? "Claude online" : "AI offline rules"}</span>`;
 }
 
 // ---------- derived ----------
 const funded = (r) => r.buyers.filter((b) => ["held", "captured"].includes(b.status));
 const fundedUnits = (r) => funded(r).reduce((s, b) => s + b.units, 0);
-const heldTotal = (r) => r.buyers.filter((b) => ["held", "captured"].includes(b.status)).reduce((s, b) => s + (b.authorizedCents ?? b.limitCents * b.units), 0);
+const heldNow = (r) => r.buyers.filter((b) => b.status === "held").reduce((s, b) => s + (b.authorizedCents ?? 0), 0);
 const STATUS = {
-  open: ["Waiting for holds", ""],
-  bidding: ["Pros are bidding", "peach"],
-  revealing: ["Revealing bids", "peach"],
-  awarded: ["Pro booked", "teal"],
+  open: ["Awaiting hold", ""],
+  bidding: ["Bidding live", "lime"],
+  revealing: ["Revealing", "lime"],
+  awarded: ["Pro booked", "violet"],
   proving: ["Checking proof", "warn"],
   settled: ["Paid on proof", "ok"],
-  released: ["Released · $0 charged", "warn"],
+  released: ["Released · $0", "warn"],
 };
-const statusChip = (r) => `<span class="chip ${STATUS[r.status]?.[1] ?? ""}">${STATUS[r.status]?.[0] ?? esc(r.status)}</span>`;
+const statusChip = (r) => `<span class="chip ${STATUS[r.status]?.[1] ?? ""}">${r.status === "bidding" ? `<span class="pulse"></span>` : ""}${STATUS[r.status]?.[0] ?? esc(r.status)}</span>`;
 const FLOW = [
   ["Funded", "lock", (r) => funded(r).length > 0],
-  ["Sealed bids", "hash", (r) => r.commitments.length > 0],
+  ["Sealed", "hash", (r) => r.commitments.length > 0],
   ["Winner", "check", (r) => !!r.award],
   ["Proof", "camera", (r) => !!r.proof?.submittedAt],
   ["Paid", "receipt", (r) => r.status === "settled"],
 ];
+const KIND = { paypal: "paypal", policy: "policy", ai: "ai", provider: "provider" };
+const LABEL = {
+  "request.created": "request created", "request.joined": "neighbour joined", "order.created": "order AUTHORIZE created", "hold.authorized": "hold placed",
+  "bidding.opened": "bidding opened", "bid.committed": "sealed bid committed", "bidding.closed": "bidding closed", "bid.revealed": "bid revealed ✓ hash", "bid.reveal_rejected": "reveal REJECTED",
+  "award.made": "winner chosen (deterministic)", "award.none": "no feasible bid", "offer.reviewed": "promise check", "proof.challenge_issued": "proof code issued", "proof.submitted": "proof submitted",
+  "job.confirmed": "homeowner confirmed", "hold.captured": "capture", "hold.voided": "hold released", "hold.reauthorized": "hold renewed", "payout.created": "payout to pro",
+  "settlement.approved": "settlement approved", "request.released": "all holds released", blocked: "POLICY BLOCKED", webhook: "webhook",
+};
+const feedLines = (entries, n = 8) => entries.slice(-n).reverse().map((e) => {
+  const k = e.actor.split(":")[0];
+  const d = e.data || {};
+  const extra = d.amount ? ` $${d.amount}` : d.priceCents ? ` ${usd(d.priceCents)}` : d.hash ? ` ${String(d.hash).slice(0, 10)}…` : d.rule ? ` [${d.rule}]` : "";
+  return `<div class="ln"><span class="t">${hhmm(e.at)}</span><span><span class="k ${KIND[k] || ""}">${esc(k)}</span> ${esc(LABEL[e.action] || e.action)}${esc(extra)}</span></div>`;
+}).join("");
 
-// ---------- views ----------
+// ---------- home ----------
 function viewHome() {
-  const mine = requests.filter((r) => r.mode === "solo");
-  const groups = requests.filter((r) => r.mode === "together");
-  const saved = requests.filter((r) => r.status === "settled").reduce((s, r) => s + r.buyers.reduce((t, b) => t + (b.capturedCents ? (b.authorizedCents ?? 0) - b.capturedCents : 0), 0), 0);
+  const held = requests.reduce((s, r) => s + heldNow(r), 0);
+  const returned = requests.reduce((s, r) => s + r.buyers.reduce((t, b) => t + (b.status === "captured" ? (b.authorizedCents ?? 0) - (b.capturedCents ?? 0) : b.status === "voided" ? (b.authorizedCents ?? 0) : 0), 0), 0);
+  const blocks = audit.entries.filter((e) => e.action === "blocked").length;
+  const active = requests.filter((r) => !["settled", "released"].includes(r.status)).length;
+  const latest = requests.find((r) => !["settled", "released"].includes(r.status)) || requests[0];
   return `
-  <div class="hello"><div><div class="eyebrow">${new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</div><h2 style="margin-top:4px">Hi Maria 👋</h2></div>
-    <div class="env-pills hide-sm">${envPills()}</div></div>
-  <section class="hero">
-    <h1 class="display">Fair prices.<br><em>Paid on proof.</em></h1>
-    <p>Say what needs fixing and the most you'll pay. Verified pros compete with <b>sealed bids</b>, and PayPal holds your money until the job is <b>proven done</b>. No deposits to strangers.</p>
-    <form class="ask" id="ask">
-      ${ic("spark")}
-      <input name="q" placeholder="My water heater is leaking, max $400…" aria-label="What needs doing?" autocomplete="off" />
-      <button class="btn primary" type="submit">Ask agent</button>
-    </form>
-    <div class="trust-row">
-      <span class="chip">${ic("lock")}Held, not paid</span>
-      <span class="chip">${ic("hash")}Sealed bids</span>
-      <span class="chip">${ic("camera")}Proof before payment</span>
-      ${saved ? `<span class="chip ok">${ic("check")}${usd0(saved)} returned to buyers</span>` : ""}
+  <div class="agentbar fade-in">
+    <div class="who"><span class="pulse"></span>AGENT ACTIVE</div>
+    <div class="small muted hide-sm">Watching ${requests.length} jobs · ${audit.verify.length} signed events</div>
+    <div class="stats">
+      <div><small>Open jobs</small><b class="num">${active}</b></div>
+      <div><small>Held in PayPal</small><b>${money(held, { count: true })}</b></div>
+      <div><small>Returned</small><b>${money(returned, { count: true })}</b></div>
+      <div><small>Policy blocks</small><b class="num" style="color:${blocks ? "var(--red)" : "inherit"}">${blocks}</b></div>
     </div>
-  </section>
-
-  <section class="section">
-    <div class="row-between"><h3>Popular jobs</h3></div>
-    <div class="tiles">${["plumbing", "electrical", "hvac", "gutters", "cleaning", "handyman"].map((c) =>
-      `<button class="tile" data-cat="${c}" style="background:${cat(c).tint}">${ic(cat(c).icon)}<div><b>${cat(c).label}</b><br><small>Sealed bids</small></div></button>`).join("")}</div>
-  </section>
-
-  <section class="section">
-    <div class="row-between"><h3>Your jobs</h3><a class="small muted" href="#/jobs">See all</a></div>
-    <div class="jobs">${mine.length ? mine.slice(0, 4).map(jobCard).join("") : `<div class="card empty">No jobs yet. Post one above.</div>`}</div>
-  </section>
-
-  ${groups.length ? `<section class="section">
-    <div class="row-between"><h3>Together near you</h3><span class="small muted">One truck, one trip: lower price for every home</span></div>
-    <div class="jobs">${groups.slice(0, 2).map(jobCard).join("")}</div>
-  </section>` : ""}`;
+  </div>
+  <div class="bento">
+    <section class="card b-hero fade-in">
+      <div class="orb" aria-hidden="true"></div>
+      <div class="eyebrow">Sealed-bid home services · PayPal escrow</div>
+      <h1 class="display" style="margin-top:12px">Fair prices.<br><span class="grad">Paid on proof.</span></h1>
+      <p>Say what needs fixing and the most you'll pay. Pros' AI agents compete with <b>sealed bids</b>. PayPal holds your money until the job is <b>proven done</b>.</p>
+      <form class="cmd" id="ask">
+        ${ic("spark")}
+        <input name="q" placeholder="Water heater leaking, fix by Friday, max $400…" aria-label="What needs doing?" autocomplete="off" />
+        <button class="btn primary" type="submit">Ask ${ic("arrow")}</button>
+      </form>
+      <div class="pills"><span class="chip">${ic("lock")}Held, not paid</span><span class="chip">${ic("hash")}Commit-reveal bids</span><span class="chip">${ic("camera")}Proof before payment</span><span class="chip">${ic("shield")}Policy-gated</span></div>
+    </section>
+    <section class="card b-vault vaultmini fade-in">
+      <div class="eyebrow">In PayPal right now</div>
+      <div class="big">${money(held, { count: true })}</div>
+      <div class="small muted">Reserved across ${requests.filter((r) => heldNow(r) > 0).length} jobs. Not paid to anyone yet.</div>
+      <div class="bar" style="margin-top:14px"><i style="width:${held + returned ? Math.max(6, (held / (held + returned)) * 100) : 6}%"></i></div>
+      <div class="row-between small" style="margin-top:8px"><span class="muted">held</span><span class="muted">returned ${usd0(returned)}</span></div>
+      <div style="margin-top:auto;padding-top:16px">${latest ? `<a class="btn block" href="#/job/${latest.id}">Open latest job ${ic("arrow")}</a>` : ""}</div>
+    </section>
+    <section class="b-cats fade-in">
+      <div class="row-between" style="margin:6px 2px 10px"><h3>Start a job</h3><span class="small muted">licensed pros · sealed bids</span></div>
+      <div class="cats">${["plumbing", "electrical", "hvac", "gutters", "cleaning", "handyman"].map((c) =>
+        `<button class="cat" data-cat="${c}" style="--tint:${cat(c).tint}"><span class="ico">${ic(cat(c).icon)}</span><span><b>${cat(c).label}</b><small>sealed bids</small></span></button>`).join("")}</div>
+    </section>
+    <section class="card b-jobs fade-in">
+      <div class="card-head"><h3>Your jobs</h3><a class="small muted" href="#/jobs">View all →</a></div>
+      <div class="jobs">${requests.length ? requests.slice(0, 5).map(jobRow).join("") : `<div class="empty">No jobs yet.</div>`}</div>
+    </section>
+    <section class="card b-feed fade-in">
+      <div class="card-head"><h3>${ic("terminal", "inline")} Agent console</h3><span class="chip ${audit.verify.ok ? "ok" : "bad"}">${audit.verify.ok ? "chain ✓" : "broken"}</span></div>
+      <div class="feed">${feedLines(audit.entries, 9) || `<div class="muted">idle</div>`}</div>
+      <div class="caret small muted" style="margin-top:8px;font-family:var(--mono)">listening</div>
+    </section>
+  </div>`;
 }
 
-function jobCard(r) {
+function jobRow(r) {
   const c = cat(r.category);
   const fu = fundedUnits(r);
   const total = r.buyers.reduce((s, b) => s + b.units, 0);
-  const price = r.award ? `<span class="money">${usd0(r.award.priceCents)}</span><span class="muted small"> ${r.mode === "together" ? "/home" : "final"}</span>` : `<span class="muted small">${r.commitments.length} sealed bid${r.commitments.length === 1 ? "" : "s"}</span>`;
   return `<a class="job" href="#/job/${r.id}">
-    <div class="job-top">
-      <div class="job-ic" style="background:${c.tint}">${ic(c.icon)}</div>
-      <div style="flex:1;min-width:0"><h3>${esc(r.title)}</h3><div class="small muted">${c.label}${r.zip ? ` · ${esc(r.zip)}` : ""} · ${r.mode === "together" ? `${total} homes` : "Solo"}</div></div>
-    </div>
-    ${r.mode === "together" ? `<div><div class="row-between small"><span><b>${fu}</b> of ${total} homes funded</span><span class="faces">${r.buyers.slice(0, 5).map((b) => `<span class="face" style="background:${tint(b.name)}">${esc(initials(b.name))}</span>`).join("")}</span></div><div class="bar" style="margin-top:8px"><i style="width:${total ? (fu / total) * 100 : 0}%"></i></div></div>` : ""}
-    <div class="row-between">${statusChip(r)}<div>${price}</div></div>
+    <span class="ico">${ic(c.icon)}</span>
+    <div><h3>${esc(r.title)}</h3><div class="meta">${c.label.toLowerCase()} · ${esc(r.zip || "n/a")} · ${r.mode === "together" ? `${fu}/${total} homes funded` : "solo"}</div>
+      ${r.mode === "together" ? `<div class="bar"><i style="width:${total ? (fu / total) * 100 : 0}%"></i></div>` : ""}</div>
+    <div class="right">${statusChip(r)}${r.award ? `<span class="price">${money(r.award.priceCents)}</span>` : `<span class="small muted">${r.commitments.length} sealed</span>`}</div>
   </a>`;
 }
 
 function viewJobs() {
-  return `<div class="row-between" style="margin-bottom:14px"><h2>My jobs</h2><a class="btn primary" href="#/new">${ic("plus")}Post a job</a></div>
-    <div class="jobs">${requests.length ? requests.map(jobCard).join("") : `<div class="card empty">No jobs yet.</div>`}</div>`;
+  return `<div class="row-between" style="margin-bottom:16px"><div><div class="eyebrow">All requests</div><h2 style="margin-top:6px">Jobs</h2></div><a class="btn primary" href="#/new">${ic("plus")}Post a job</a></div>
+    <div class="card"><div class="jobs">${requests.length ? requests.map(jobRow).join("") : `<div class="empty">No jobs yet.</div>`}</div></div>`;
 }
 
 // ---------- job detail ----------
@@ -201,90 +237,99 @@ function viewJob(r) {
   const done = FLOW.map(([, , f]) => f(r));
   const nowIdx = done.indexOf(false);
   const req = r.requirements;
+  const jobFeed = audit.entries.filter((e) => e.requestId === r.id);
   return `
-  <a class="back" href="#/jobs">${ic("back")}My jobs</a>
+  <a class="back" href="#/jobs">${ic("back")}Jobs</a>
   <div class="detail">
     <div class="col">
-      <div class="card">
+      <div class="card fade-in">
         <div class="job-title">
-          <div class="job-ic" style="background:${c.tint}">${ic(c.icon)}</div>
-          <div style="min-width:0;flex:1"><div class="row" style="gap:8px">${statusChip(r)}<span class="chip">${r.mode === "together" ? `${ic("users")}Together` : "Solo"}</span></div>
-            <h1 style="margin-top:8px">${esc(r.title)}</h1>
-            <p class="muted" style="margin:6px 0 0">${esc(r.description)}</p></div>
+          <div class="ico">${ic(c.icon)}</div>
+          <div style="min-width:0;flex:1"><div class="row" style="gap:6px">${statusChip(r)}<span class="chip">${r.mode === "together" ? `${ic("users")}Together` : "Solo"}</span><span class="chip mono" style="font-size:11px">${esc(r.id)}</span></div>
+            <h1 style="margin-top:10px">${esc(r.title)}</h1>
+            <p class="muted" style="margin:8px 0 0">${esc(r.description)}</p></div>
         </div>
-        <div class="chips" style="margin-top:12px">
+        <div class="chips" style="margin-top:14px">
           <span class="chip">${ic(c.icon)}${c.label}</span>
           ${r.zip ? `<span class="chip">${ic("pin")}${esc(r.zip)}</span>` : ""}
-          ${req.licensed ? `<span class="chip">${ic("shield")}Licensed pro only</span>` : ""}
-          ${req.minWarrantyMonths ? `<span class="chip">${ic("check")}${req.minWarrantyMonths}-month warranty</span>` : ""}
+          ${req.licensed ? `<span class="chip">${ic("shield")}Licensed only</span>` : ""}
+          ${req.minWarrantyMonths ? `<span class="chip">${ic("check")}${req.minWarrantyMonths}-mo warranty</span>` : ""}
           ${req.completeBy ? `<span class="chip">${ic("clock")}Start by ${esc(new Date(req.completeBy + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }))}</span>` : ""}
         </div>
         <div class="flow" aria-label="Progress">${FLOW.map(([n, i], k) => `<div class="s ${done[k] ? "done" : k === nowIdx ? "now" : ""}"><span class="n">${done[k] ? ic("check") : ic(i)}</span>${n}</div>`).join("")}</div>
       </div>
-      <div class="mc-mobile">${moneyCard(r)}</div>
+      <div class="mc-mobile">${vault(r)}</div>
       ${peopleCard(r)}
       ${bidsCard(r)}
       ${winnerCard(r)}
       ${proofCard(r)}
       ${receiptCard(r)}
     </div>
-    <aside class="rail">${moneyCard(r)}</aside>
+    <aside class="rail">${vault(r)}
+      <div class="card"><div class="card-head"><h3>${ic("terminal", "inline")} Agent console</h3><span class="small muted mono">${jobFeed.length} events</span></div>
+        <div class="feed">${feedLines(jobFeed, 10) || `<div class="muted">idle</div>`}</div></div>
+    </aside>
   </div>`;
 }
 
-/** The single next action for this job, shown in the money card and as a sticky CTA on mobile. */
 function nextAction(r) {
   const pending = r.buyers.find((b) => b.status === "pending");
   const anyHeld = r.buyers.some((b) => b.status === "held");
   if (["open", "bidding"].includes(r.status) && r.mode === "solo" && pending) return { id: "hold", label: `Hold ${usd0(pending.limitCents * pending.units)} with PayPal`, buyer: pending.id };
-  if (["open", "bidding"].includes(r.status) && anyHeld && r.commitments.length === 0) return { id: "run", label: "Invite pros to bid" };
-  if (r.status === "bidding" && r.commitments.length) return { id: "close", label: "Reveal sealed bids" };
+  if (["open", "bidding"].includes(r.status) && anyHeld && r.commitments.length === 0) return { id: "run", label: "Invite pros' agents to bid" };
+  if (r.status === "bidding" && r.commitments.length) return { id: "close", label: "Unseal bids & pick winner" };
   if (["open", "bidding"].includes(r.status) && r.mode === "together" && pending) return { id: "scroll", target: "people", label: "Neighbours: approve holds" };
   if (r.status === "awarded" && !r.proof) return { id: "challenge", label: "Pro: start job · get code" };
   if (r.status === "awarded" && r.proof) return { id: "scroll", target: "proof", label: "Pro: upload proof photo" };
   if (r.status === "proving" && r.proof?.verdict !== "pass" && !r.buyerConfirmedAt && r.proof?.verdict !== "fail") return { id: "confirm", label: "Confirm the job is done" };
-  if (r.status === "proving" && (r.proof?.verdict === "pass" || r.buyerConfirmedAt)) return { id: "settle", label: "Release payment" };
+  if (r.status === "proving" && (r.proof?.verdict === "pass" || r.buyerConfirmedAt)) return { id: "settle", label: "Release payment via PayPal" };
   return null;
 }
 
-function moneyCard(r) {
+function vault(r) {
   const mine = r.mode === "solo" ? r.buyers[0] : null;
-  const held = r.mode === "solo" ? (mine?.authorizedCents ?? mine?.limitCents * (mine?.units || 1)) : heldTotal(r);
+  const heldAmt = r.mode === "solo" ? (mine?.authorizedCents ?? (mine?.limitCents ?? 0) * (mine?.units || 1)) : r.buyers.filter((b) => b.authorizedCents).reduce((s, b) => s + b.authorizedCents, 0);
   const charged = r.buyers.reduce((s, b) => s + (b.capturedCents || 0), 0);
   const isHeld = r.buyers.some((b) => b.status === "held");
   const proven = r.status === "proving" && (r.proof?.verdict === "pass" || !!r.buyerConfirmedAt);
   const stage = r.status === "settled" ? 3 : proven ? 2 : isHeld || r.status === "proving" ? 1 : 0;
   const t = (k, label, icon) => `<div class="t ${stage > k ? "done" : stage === k ? "now" : ""}"><span class="dot">${stage > k ? ic("check") : ic(icon)}</span>${label}</div>`;
   const next = nextAction(r);
-  let headline, amount, sub;
-  if (r.status === "settled") { headline = "Paid on proof"; amount = usd(charged); sub = `charged · ${usd(held - charged)} returned to ${r.mode === "solo" ? "you" : "neighbours"}`; }
-  else if (r.status === "released") { headline = "Released"; amount = "$0.00"; sub = "Every hold voided. Nobody was charged."; }
-  else if (isHeld) { headline = r.mode === "solo" ? "Your money is held" : "Held across the street"; amount = usd(held); sub = r.award ? `Final price ${usd(r.award.priceCents)}${r.mode === "together" ? "/home" : ""}: you'll never pay more than you held` : "Reserved in PayPal, not paid to anyone"; }
-  else { headline = r.mode === "solo" ? "Your private limit" : "Group limits"; amount = usd(r.mode === "solo" ? (mine?.limitCents ?? 0) * (mine?.units || 1) : r.buyers.reduce((s, b) => s + b.limitCents * b.units, 0)); sub = "Pros never see this number"; }
+  let eyebrow, amount, sub, state;
+  const finalTotal = r.award ? r.award.priceCents * r.award.unitsServed : 0;
+  if (r.status === "settled") { eyebrow = "Paid on proof"; amount = charged; sub = `${usd(heldAmt - charged)} returned to ${r.mode === "solo" ? "you" : "neighbours"}`; state = ["check", "released on proof"]; }
+  else if (r.status === "released") { eyebrow = "Released"; amount = 0; sub = "Every hold voided. Nobody was charged."; state = ["x", "nothing charged"]; }
+  else if (isHeld) { eyebrow = r.mode === "solo" ? "Your money is held" : "Held across the street"; amount = heldNow(r) || heldAmt; sub = r.award ? `Final ${usd(r.award.priceCents)}${r.mode === "together" ? "/home" : ""}. Never more than you held.` : "Reserved in PayPal, not paid to anyone."; state = ["lock", "held · not paid"]; }
+  else { eyebrow = r.mode === "solo" ? "Your private limit" : "Group limits"; amount = r.buyers.reduce((s, b) => s + b.limitCents * b.units, 0); sub = "Pros never see this number."; state = ["shield", "private"]; }
+  const pct = r.status === "settled" ? (heldAmt ? charged / heldAmt : 1) : r.award && heldAmt ? Math.min(1, finalTotal / heldAmt) : isHeld ? 1 : 0;
+  const C = 2 * Math.PI * 38;
+  const ringLbl = r.award ? `<b>${Math.round(pct * 100)}%</b>of hold` : isHeld ? `<b>100%</b>held` : `<b>n/a</b>no hold`;
   const lines = [];
-  if (r.award) lines.push(["Winning bid", `${usd(r.award.priceCents)}${r.mode === "together" ? " × " + r.award.unitsServed : ""}`]);
+  if (r.award) lines.push(["Winning bid", `${usd(r.award.priceCents)}${r.mode === "together" ? ` × ${r.award.unitsServed}` : ""}`]);
   if (r.settlement?.payout) lines.push(["Paid to pro", usd(r.settlement.payout.amountCents)], ["Platform fee", usd(r.settlement.payout.feeCents)]);
   if (r.award && r.status !== "settled") lines.push([r.mode === "solo" ? "You keep" : "Returned at capture", usd(r.buyers.filter((b) => r.award.buyersIn.includes(b.id)).reduce((s, b) => s + (b.authorizedCents ?? 0) - r.award.priceCents * b.units, 0))]);
-  return `<div class="moneycard">
-    <div class="eyebrow">${esc(headline)}</div>
-    <div class="amount money">${amount}</div>
-    <div class="sub">${esc(sub)}</div>
-    <span class="badge">${ic(r.status === "settled" ? "check" : "lock")}${r.status === "settled" ? "Released on proof" : r.status === "released" ? "Nothing charged" : "Held, not paid"}</span>
+  return `<div class="vault fade-in">
+    <div class="top">
+      <div style="min-width:0"><div class="eyebrow" style="color:var(--lime)">${ic("vault", "inline")} ${esc(eyebrow)}</div>
+        <div class="amount">${money(amount, { count: true })}</div><div class="sub">${esc(sub)}</div></div>
+      <div class="ring" aria-hidden="true"><svg viewBox="0 0 92 92"><circle class="trackc" cx="46" cy="46" r="38"/><circle class="fill" cx="46" cy="46" r="38" stroke-dasharray="${C}" stroke-dashoffset="${C}" data-offset="${C * (1 - pct)}"/></svg><div class="lbl">${ringLbl}</div></div>
+    </div>
+    <span class="state">${ic(state[0])}${esc(state[1])}</span>
     <div class="track">${t(0, "You hold", "lock")}${t(1, "Work proven", "camera")}${t(2, "Pro paid", "receipt")}</div>
     ${lines.length ? `<div class="lines">${lines.map(([a, b]) => `<div><span>${a}</span><b>${b}</b></div>`).join("")}</div>` : ""}
-    ${next ? `<button class="btn primary block" data-next>${esc(next.label)}</button>` : ""}
-    ${r.status === "proving" ? `<button class="btn ghostlight block" data-overcharge>Test: let an agent overcharge</button>` : ""}
-    <div class="hint">${health?.paypal === "sandbox" ? "PayPal sandbox · real API calls" : "Simulated PayPal: add sandbox keys for real calls"}</div>
+    ${next ? `<button class="btn primary block" data-next>${esc(next.label)} ${ic("arrow")}</button>` : ""}
+    ${r.status === "proving" ? `<button class="btn ghost block" data-overcharge>${ic("shield")}Test: let an agent overcharge</button>` : ""}
+    <div class="hint">${health?.paypal === "sandbox" ? "paypal sandbox · live api calls" : "simulated paypal · add sandbox keys for live calls"}</div>
   </div>`;
 }
 
 function peopleCard(r) {
   const open = ["open", "bidding"].includes(r.status);
   const rows = r.buyers.map((b) => {
-    const st = { held: ["ok", "Held"], captured: ["ok", `Paid ${usd(b.capturedCents)}`], voided: ["warn", "Released · $0"], failed: ["bad", "Failed"], pending: ["", "Not held yet"] }[b.status];
+    const st = { held: ["ok", "held"], captured: ["ok", `paid ${usd(b.capturedCents)}`], voided: ["warn", "released · $0"], failed: ["bad", "failed"], pending: ["", "not held"] }[b.status];
     return `<div class="person">
       <span class="avatar" style="background:${tint(b.name)}">${esc(initials(b.name))}</span>
-      <div class="who"><b>${esc(b.name)}</b><small>Limit ${usd0(b.limitCents)} · private${b.soloBestCents ? ` · solo quote ${usd0(b.soloBestCents)}` : ""}</small>${b.note ? `<small>${esc(b.note)}</small>` : ""}</div>
+      <div class="who"><b>${esc(b.name)}</b><small>limit ${usd0(b.limitCents)} · private${b.soloBestCents ? ` · solo quote ${usd0(b.soloBestCents)}` : ""}${b.authorizationId ? ` · ${esc(b.authorizationId)}` : ""}</small>${b.note ? `<small style="color:var(--amber)">${esc(b.note)}</small>` : ""}</div>
       <div class="act"><span class="chip ${st[0]}">${st[1]}</span>
         ${b.status === "pending" && open ? `<button class="btn primary" data-hold="${b.id}">${ic("lock")}Hold ${usd0(b.limitCents * b.units)}</button>` : ""}
         ${b.status === "held" && open ? `<button class="btn ghost" data-cancel="${b.id}">Cancel hold</button>` : ""}</div>
@@ -294,12 +339,12 @@ function peopleCard(r) {
     <form class="form-grid" data-join style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
       <label class="field">Neighbour name<input class="input" name="name" required placeholder="Jordan" /></label>
       <label class="field">Private limit per home ($)<input class="input" name="limitDollars" type="number" min="1" inputmode="decimal" required /></label>
-      <label class="field">Solo quote you already have ($, optional)<input class="input" name="soloBestDollars" type="number" min="1" inputmode="decimal" /></label>
+      <label class="field">Solo quote already in hand ($, optional)<input class="input" name="soloBestDollars" type="number" min="1" inputmode="decimal" /></label>
       <div class="field" style="justify-content:flex-end"><button class="btn" type="submit">${ic("plus")}Join this group</button></div>
     </form>` : "";
-  return `<div class="card" id="people">
-    <div class="card-head"><div><h3>${r.mode === "solo" ? "Your hold" : "Neighbours"}</h3><div class="small muted">${r.mode === "solo" ? "One PayPal approval. Charged only on proof, at the final price." : "Each home approves its own hold. Anyone whose limit is below the final price is released, never charged."}</div></div>
-      ${r.mode === "together" ? `<span class="chip">${fundedUnits(r)}/${r.buyers.length} funded</span>` : ""}</div>
+  return `<div class="card fade-in" id="people">
+    <div class="card-head"><div><h3>${r.mode === "solo" ? "Funded request" : "Neighbours"}</h3><div class="small muted" style="margin-top:4px">${r.mode === "solo" ? "One PayPal approval. Charged only on proof, at the final price." : "Each home approves its own hold. Below the final price → released, never charged."}</div></div>
+      ${r.mode === "together" ? `<span class="chip lime">${fundedUnits(r)}/${r.buyers.length} funded</span>` : ""}</div>
     <div class="people">${rows}</div>${join}
   </div>`;
 }
@@ -307,27 +352,28 @@ function peopleCard(r) {
 function bidsCard(r) {
   if (!r.commitments.length) {
     const can = ["open", "bidding"].includes(r.status) && r.buyers.some((b) => b.status === "held");
-    return `<div class="card"><div class="card-head"><div><h3>Sealed bids</h3><div class="small muted">Pros' AI agents see the job, area and funded homes. Never your limit.</div></div></div>
-      <div class="note">${ic("info")}<div>${can ? "Your request is funded. Invite pros to submit sealed bids." : "Approve a PayPal hold first: pros only bid on funded jobs."}</div></div></div>`;
+    return `<div class="card fade-in"><div class="card-head"><div><h3>Sealed bids</h3><div class="small muted" style="margin-top:4px">Pros' agents see job, area and funded homes. Never your limit.</div></div></div>
+      <div class="note">${ic("info")}<div>${can ? "Your request is funded. Invite pros' agents to submit sealed bids." : "Approve a PayPal hold first. Pros only bid on funded jobs."}</div></div></div>`;
   }
-  const items = r.commitments.map((c) => {
+  const animate = ui.justRevealed === r.id;
+  const items = r.commitments.map((c, i) => {
     const rev = r.reveals.find((v) => v.offer.providerId === c.providerId);
     const row = r.award?.table.find((t) => t.providerId === c.providerId);
     const win = r.award?.providerId === c.providerId;
     const o = rev?.offer;
-    return `<div class="bid ${win ? "win" : r.award ? "out" : ""}">
+    return `<div class="bid ${win ? "win" : r.award ? "out" : ""} ${rev && animate ? "reveal-anim" : ""}" style="animation-delay:${i * 120}ms">
       ${win ? `<span class="ribbon">WINNER</span>` : ""}
       <div class="head"><span class="avatar" style="background:${tint(c.providerName)}">${esc(initials(c.providerName))}</span>
-        <div style="min-width:0"><b>${esc(c.providerName)}</b><div class="small muted">AI agent · simulated</div></div></div>
-      ${!rev ? `<div class="sealed">${ic("lock")}<div style="min-width:0"><b class="small">Sealed</b><div class="mono muted">${esc(c.hash.slice(0, 24))}…</div></div></div>`
-        : `<div><span class="price money">${usd0(o.priceCents)}</span><span class="muted small">${o.minUnits > 1 ? ` /home · min ${o.minUnits}` : ""}</span></div>
-           <div class="chips">${o.promises.licensed ? `<span class="chip ok">${ic("shield")}${esc(o.promises.licenseNo)}</span>` : `<span class="chip bad">${ic("x")}Unlicensed</span>`}
-             <span class="chip">${o.promises.warrantyMonths}-mo warranty</span><span class="chip">${ic("clock")}${esc(when(o.promises.startAt, { minute: undefined }))}</span></div>
-           <div class="small ${rev.valid ? "" : "muted"}">${rev.valid ? `<span class="chip ok">${ic("check")}Matches sealed hash</span>` : `<span class="chip bad">${esc(rev.rejectReason)}</span>`}</div>
+        <div style="min-width:0"><b>${esc(c.providerName)}</b><div class="small muted mono">ai agent · simulated</div></div></div>
+      ${!rev ? `<div class="sealed"><div class="lockrow">${ic("lock")}sealed · sha-256</div><div class="scramble" data-hash="${esc(c.hash)}">${esc(c.hash)}</div></div>`
+        : `<div><span class="price">${money(o.priceCents)}</span><span class="muted small">${o.minUnits > 1 ? ` /home · min ${o.minUnits}` : ""}</span></div>
+           <div class="chips">${o.promises.licensed ? `<span class="chip ok">${ic("shield")}${esc(o.promises.licenseNo)}</span>` : `<span class="chip bad">${ic("x")}unlicensed</span>`}
+             <span class="chip">${o.promises.warrantyMonths}-mo warranty</span><span class="chip">${ic("clock")}${esc(when(o.promises.startAt, { minute: undefined, month: undefined, day: undefined }))}</span></div>
+           <div>${rev.valid ? `<span class="chip lime">${ic("check")}matches sealed hash</span>` : `<span class="chip bad">${esc(rev.rejectReason)}</span>`}</div>
            ${row && !win ? `<div class="why">${esc(row.note)}</div>` : ""}`}
     </div>`;
   }).join("");
-  return `<div class="card"><div class="card-head"><div><h3>Sealed bids</h3><div class="small muted">Each pro committed a SHA-256 fingerprint. Nobody, including us, can read a bid until bidding closes.</div></div><span class="chip">${r.commitments.length} bids</span></div>
+  return `<div class="card fade-in"><div class="card-head"><div><h3>Sealed bids</h3><div class="small muted" style="margin-top:4px">Each agent committed a SHA-256 fingerprint. Nobody, including us, can read a bid before it closes.</div></div><span class="chip">${r.commitments.length} bids</span></div>
     <div class="bids">${items}</div></div>`;
 }
 
@@ -337,11 +383,11 @@ function winnerCard(r) {
   const w = r.reveals.find((v) => v.offer.providerId === a.providerId);
   const rev = r.aiOfferReview;
   const outs = a.buyersOut.map((o) => `<li><b>${esc(r.buyers.find((b) => b.id === o.buyerId)?.name)}</b>: ${esc(o.reason)}</li>`).join("");
-  return `<div class="card">
-    <div class="card-head"><div><div class="eyebrow">Why this pro won</div><h3 style="margin-top:4px">${esc(a.providerName)}</h3></div><span class="money" style="font-size:26px">${usd0(a.priceCents)}</span></div>
-    <p style="margin:0 0 10px">${esc(a.reason)}</p>
+  return `<div class="card fade-in">
+    <div class="card-head"><div><div class="eyebrow">Deterministic clearing</div><h3 style="margin-top:6px">${esc(a.providerName)} wins</h3></div><span style="font-size:30px">${money(a.priceCents)}</span></div>
+    <p style="margin:0 0 12px;color:var(--ink-2)">${esc(a.reason)}</p>
     ${w ? `<div class="note">${ic("info")}<div><b>Binding promises</b> (from the sealed offer): ${w.offer.promises.licensed ? `licensed ${esc(w.offer.promises.licenseNo)}` : "not licensed"}, ${w.offer.promises.warrantyMonths}-month warranty, starts ${esc(when(w.offer.promises.startAt))}.<div class="small muted" style="margin-top:4px">Pitch (display only, never parsed): “${esc(w.pitch)}”</div></div></div>` : ""}
-    ${rev ? `<div class="note ${rev.ok ? "ok" : "warn"}" style="margin-top:10px">${ic("spark")}<div><b>AI promise check:</b> ${esc(rev.summary)}${rev.flags.length ? `<ul>${rev.flags.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>` : ""}</div></div>` : ""}
+    ${rev ? `<div class="note ai" style="margin-top:10px">${ic("spark")}<div><b>AI promise check:</b> ${esc(rev.summary)}${rev.flags.length ? `<ul>${rev.flags.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>` : ""}</div></div>` : ""}
     ${outs ? `<div class="note warn" style="margin-top:10px">${ic("hand")}<div><b>Released, never charged</b><ul>${outs}</ul></div></div>` : ""}
   </div>`;
 }
@@ -351,51 +397,51 @@ function proofCard(r) {
   const p = r.proof;
   const checks = p?.checks?.length ? `<div class="checks" style="margin-top:14px">${p.checks.map((c) => {
     const k = c.ok === true ? "ok" : c.ok === false ? "bad" : "na";
-    return `<div class="check ${k}"><span class="ci">${ic(k === "ok" ? "check" : k === "bad" ? "x" : "q")}</span><div><b class="small">${esc(c.name)}</b><small>${esc(c.detail)}</small></div><span class="chip">${c.by === "ai" ? "AI vision" : "Code"}</span></div>`;
+    return `<div class="check ${k}"><span class="ci">${ic(k === "ok" ? "check" : k === "bad" ? "x" : "q")}</span><div><b class="small">${esc(c.name)}</b><small>${esc(c.detail)}</small></div><span class="chip ${c.by === "ai" ? "violet" : ""}">${c.by === "ai" ? "AI vision" : "code"}</span></div>`;
   }).join("")}</div>
-  <div class="note ${p.verdict === "pass" ? "ok" : p.verdict === "fail" ? "bad" : "warn"}" style="margin-top:10px">${ic(p.verdict === "pass" ? "check" : p.verdict === "fail" ? "x" : "info")}<div><b>Verdict: ${esc(p.verdict)}</b>. ${p.verdict === "pass" ? "Proof passed. Payment can be released." : p.verdict === "fail" ? "Proof failed. Money stays on hold; it can be released back to you." : "Needs your eyes: check the photo and confirm the job is done."}</div></div>` : "";
-  return `<div class="card" id="proof">
-    <div class="card-head"><div><h3>Proof of completion</h3><div class="small muted">The pro photographs the finished job with this one-time code written on paper in the frame.</div></div></div>
-    ${p ? `<div class="ticket"><div class="code">${esc(p.code)}</div><div class="small"><b>Code issued ${esc(when(p.issuedAt))}</b><br>Code checks reject reused or stale photos. AI vision reads the code and checks the work matches the job.</div></div>`
-      : `<div class="note">${ic("camera")}<div>When the pro starts the job, they get a one-time code. Money only moves after the photo proof.</div></div>`}
+  <div class="note ${p.verdict === "pass" ? "ok" : p.verdict === "fail" ? "bad" : "warn"}" style="margin-top:10px">${ic(p.verdict === "pass" ? "check" : p.verdict === "fail" ? "x" : "info")}<div><b>Verdict: ${esc(p.verdict)}</b>. ${p.verdict === "pass" ? "Proof passed. Payment can be released." : p.verdict === "fail" ? "Proof failed. Money stays on hold and can be released back." : "Needs the homeowner's eyes: check the photo and confirm."}</div></div>` : "";
+  return `<div class="card fade-in" id="proof">
+    <div class="card-head"><div><h3>Proof of completion</h3><div class="small muted" style="margin-top:4px">The pro photographs the finished job with this one-time code written in the frame.</div></div></div>
+    ${p ? `<div class="ticket"><div class="code">${esc(p.code)}</div><div class="small"><b>Issued ${esc(when(p.issuedAt))}</b><br><span class="muted">Code rejects reused or stale photos. AI vision reads the code and checks the work.</span></div></div>`
+      : `<div class="note">${ic("camera")}<div>When the pro starts, they receive a one-time code. Money only moves after photo proof.</div></div>`}
     ${p && r.status === "awarded" ? `<form data-proof class="stack" style="margin-top:14px">
-      <label class="upload" id="drop">${ic("upload")}<b>Upload the completion photo</b><span class="small muted">Code ${esc(p.code)} must be visible</span><input type="file" name="photo" accept="image/*" capture="environment" required /></label>
+      <label class="upload" id="drop">${ic("upload")}<b>Upload the completion photo</b><span class="small muted">code ${esc(p.code)} must be visible</span><input type="file" name="photo" accept="image/*" capture="environment" required /></label>
       <label class="field">Note from the pro<input class="input" name="note" placeholder="Replaced 40-gal unit, old one hauled away" /></label>
-      <button class="btn dark" type="submit">${ic("camera")}Submit proof</button></form>` : ""}
+      <button class="btn primary" type="submit">${ic("camera")}Submit proof</button></form>` : ""}
     ${checks}
   </div>`;
 }
 
 function receiptCard(r) {
-  if (r.status === "released") return `<div class="card"><h3>Released</h3><p class="muted" style="margin:6px 0 0">Every hold was voided. Nobody was charged.</p></div>`;
+  if (r.status === "released") return `<div class="card fade-in"><h3>Released</h3><p class="muted" style="margin:6px 0 0">Every hold was voided. Nobody was charged.</p></div>`;
   if (r.status !== "settled" || !r.settlement) {
-    if (r.status === "proving") return `<div class="card"><div class="row-between"><div><h3>Admin</h3><div class="small muted">Release all holds if something went wrong.</div></div><button class="btn danger" data-release>Release all holds</button></div></div>`;
+    if (r.status === "proving") return `<div class="card fade-in"><div class="row-between"><div><h3>Admin</h3><div class="small muted">Release all holds if something went wrong.</div></div><button class="btn danger" data-release>Release all holds</button></div></div>`;
     return "";
   }
   const s = r.settlement;
   const lines = r.buyers.map((b) => {
     const cap = s.captures.find((c) => c.buyerId === b.id);
     const held = b.authorizedCents ?? b.limitCents * b.units;
-    return `<div class="rline"><div><b>${esc(b.name)}</b><div class="small muted">held ${usd(held)}${cap ? ` · <span class="mono">${esc(cap.captureId)}</span>` : ` · ${esc(b.note || "released")}`}</div></div>
-      <div class="r"><b class="money">${cap ? usd(cap.amountCents) : "$0.00"}</b><div class="small" style="color:var(--ok)">${usd(cap ? held - cap.amountCents : held)} back</div></div></div>`;
+    return `<div class="rline"><div><b>${esc(b.name)}</b><div class="small muted mono">held ${usd(held)}${cap ? ` · ${esc(cap.captureId)}` : ` · ${esc(b.note || "released")}`}</div></div>
+      <div class="r"><b>${money(cap ? cap.amountCents : 0)}</b><div class="small" style="color:var(--ok)">${usd(cap ? held - cap.amountCents : held)} back</div></div></div>`;
   }).join("");
-  return `<div class="card"><div class="card-head"><div><div class="eyebrow">Receipt</div><h3 style="margin-top:4px">Settled on PayPal</h3></div>${ic("receipt")}</div>
-    <div class="receipt">${lines}</div>
+  return `<div class="card fade-in"><div class="card-head"><div><div class="eyebrow">Receipt</div><h3 style="margin-top:6px">Settled on PayPal</h3></div>${ic("receipt")}</div>
+    <div>${lines}</div>
     ${s.payout ? `<div class="note ok" style="margin-top:12px">${ic("check")}<div><b>${usd(s.payout.amountCents)} paid out to ${esc(r.award.providerName)}</b> via PayPal Payouts (fee ${usd(s.payout.feeCents)}).<div class="small mono" style="margin-top:4px">batch ${esc(s.payout.batchId)} · ${esc(s.payout.status)}</div></div></div>` : ""}</div>`;
 }
 
 // ---------- post a job ----------
 function viewNew() {
-  const d = draftState.draft;
-  return `<div class="row-between" style="margin-bottom:14px"><div><div class="eyebrow">Post a job</div><h2 style="margin-top:4px">What needs <span class="accent">fixing?</span></h2></div></div>
+  const d = ui.draft;
+  return `<div style="margin-bottom:16px"><div class="eyebrow">Post a job</div><h2 style="margin-top:6px">What needs <span class="grad">fixing?</span></h2></div>
   <div class="grid-2">
-    <div class="card">
-      <label class="field">Describe it in your own words<textarea class="input" id="intake" rows="4">${esc(draftState.text ?? "Water heater is leaking in my garage, need it fixed by Friday, max $400, Austin 78704. Licensed plumber only.")}</textarea></label>
-      <div class="row" style="margin-top:12px"><button class="btn dark" id="parse">${ic("spark")}Let the agent fill it in</button><span class="small muted" id="src">${d ? (d.source === "ai" ? "Parsed by Claude" : "Parsed by offline rules (no AI key)") : ""}</span></div>
-      ${d ? `<div class="ai-box" style="margin-top:14px"><div class="small" style="font-weight:800;margin-bottom:8px">${ic("spark", "inline")} AI suggested: edit anything below</div>
-        <div class="chips"><span class="chip">${cat(d.category).label}</span>${d.limitDollars ? `<span class="chip">Max ${usd0(d.limitDollars * 100)}</span>` : `<span class="chip warn">No limit found</span>`}${d.licensed ? `<span class="chip">Licensed</span>` : ""}${d.completeBy ? `<span class="chip">By ${esc(d.completeBy)}</span>` : ""}${d.zip ? `<span class="chip">${esc(d.zip)}</span>` : ""}${d.units > 1 ? `<span class="chip">${d.units} homes</span>` : ""}</div></div>` : ""}
+    <div class="card fade-in">
+      <label class="field">Describe it in your own words<textarea class="input" id="intake" rows="4">${esc(ui.text ?? "Water heater is leaking in my garage, need it fixed by Friday, max $400, Austin 78704. Licensed plumber only.")}</textarea></label>
+      <div class="row" style="margin-top:12px"><button class="btn primary" id="parse">${ic("spark")}Let the agent fill it in</button><span class="small muted mono" id="src">${d ? (d.source === "ai" ? "parsed by claude" : "parsed by offline rules") : ""}</span></div>
+      ${d ? `<div class="ai-box" style="margin-top:14px"><div class="small" style="font-weight:600;margin-bottom:8px;color:#cfc8ff">${ic("spark", "inline")} Agent extracted: edit anything</div>
+        <div class="chips"><span class="chip">${cat(d.category).label}</span>${d.limitDollars ? `<span class="chip lime">max ${usd0(d.limitDollars * 100)}</span>` : `<span class="chip warn">no limit found</span>`}${d.licensed ? `<span class="chip">licensed</span>` : ""}${d.completeBy ? `<span class="chip">by ${esc(d.completeBy)}</span>` : ""}${d.zip ? `<span class="chip">${esc(d.zip)}</span>` : ""}${d.units > 1 ? `<span class="chip">${d.units} homes</span>` : ""}</div></div>` : ""}
     </div>
-    <form class="card ${d ? "" : "hidden"}" id="draft">
+    <form class="card fade-in" id="draft" style="${d ? "" : "display:none"}">
       <div class="form-grid">
         <label class="field full">Job<input class="input" name="title" required value="${esc(d?.title)}" /></label>
         <label class="field full">Details for the pro<input class="input" name="description" value="${esc(d?.description)}" /></label>
@@ -410,8 +456,8 @@ function viewNew() {
           <div class="seg"><label><input type="radio" name="mode" value="solo" ${!d || d.units <= 1 ? "checked" : ""} />Just me</label><label><input type="radio" name="mode" value="together" ${d?.units > 1 ? "checked" : ""} />With neighbours</label></div></div>
         <label class="field full">Your name<input class="input" name="buyerName" value="Maria G." /></label>
       </div>
-      <div class="note" style="margin-top:14px">${ic("lock")}<div>Next you'll approve a <b>PayPal hold</b> for this amount. It's reserved, not paid, and you're only charged the winning price after proof.</div></div>
-      <button class="btn primary block" type="submit" style="margin-top:14px">Review & create request</button>
+      <div class="note" style="margin-top:14px">${ic("lock")}<div>Next you'll approve a <b>PayPal hold</b> for this amount: reserved, not paid. You're charged only the winning price, only after proof.</div></div>
+      <button class="btn primary block" type="submit" style="margin-top:14px">Create funded request ${ic("arrow")}</button>
     </form>
   </div>`;
 }
@@ -419,18 +465,18 @@ function viewNew() {
 // ---------- pros ----------
 let scheduler;
 function viewPros(signals) {
-  return `<div style="margin-bottom:14px"><div class="eyebrow">Offer Protocol · HTTP + MCP</div><h2 style="margin-top:4px">What pros' agents <span class="accent">see</span></h2>
-    <p class="muted" style="margin:6px 0 0;max-width:640px">This is everything a provider agent receives. There's no field that could carry a buyer's limit, by design and by test.</p></div>
+  return `<div style="margin-bottom:16px"><div class="eyebrow">Offer Protocol v1 · HTTP + MCP</div><h2 style="margin-top:6px">What pros' agents <span class="grad">see</span></h2>
+    <p class="muted" style="margin:8px 0 0;max-width:640px">Everything a provider agent receives. There's no field that could carry a buyer's limit: by design, and by test.</p></div>
   <div class="nolimit">${ic("shield")}Buyer price limits: never sent to providers</div>
-  <div class="section stack">${signals.length ? signals.map((s) => `<div class="card signal">
-      <div class="row-between"><div class="row"><span class="job-ic" style="background:${cat(s.category).tint}">${ic(cat(s.category).icon)}</span><div><b>${esc(s.title)}</b><div class="small muted">${esc(s.description)}</div></div></div>${statusChip({ status: s.status })}</div>
-      <div class="kv"><div><small>Funded homes</small><b>${s.fundedUnits}</b></div><div><small>Mode</small><b>${s.mode === "solo" ? "Solo" : "Together"}</b></div><div><small>Area</small><b>${esc(s.zip || "n/a")}</b></div><div><small>Closes</small><b>${esc(when(s.closesAt, { weekday: undefined, minute: undefined }))}</b></div></div>
-      <div class="chips">${s.requirements.licensed ? `<span class="chip">Licence required</span>` : ""}${s.requirements.minWarrantyMonths ? `<span class="chip">≥${s.requirements.minWarrantyMonths}-mo warranty</span>` : ""}${s.requirements.completeBy ? `<span class="chip">Start by ${esc(s.requirements.completeBy)}</span>` : ""}</div>
-    </div>`).join("") : `<div class="card empty">No jobs are open for bids right now. Fund a job, then invite pros.</div>`}</div>
-  <div class="section card"><div class="card-head"><div><h3>Booked jobs</h3><div class="small muted">Winning pros' slots (Bryntum Scheduler, US Central time)</div></div></div><div id="scheduler"></div></div>
+  <div class="section stack">${signals.length ? signals.map((s) => `<div class="card fade-in">
+      <div class="row-between"><div class="row" style="min-width:0"><span class="job-title"><span class="ico" style="width:42px;height:42px">${ic(cat(s.category).icon)}</span></span><div style="min-width:0"><b>${esc(s.title)}</b><div class="small muted">${esc(s.description)}</div></div></div>${statusChip({ status: s.status })}</div>
+      <div class="kv" style="margin-top:12px"><div><small>Funded homes</small><b>${s.fundedUnits}</b></div><div><small>Mode</small><b>${s.mode}</b></div><div><small>Area</small><b>${esc(s.zip || "n/a")}</b></div><div><small>Closes</small><b>${esc(when(s.closesAt, { weekday: undefined, minute: undefined }))}</b></div></div>
+      <div class="chips" style="margin-top:10px">${s.requirements.licensed ? `<span class="chip">licence required</span>` : ""}${s.requirements.minWarrantyMonths ? `<span class="chip">≥${s.requirements.minWarrantyMonths}-mo warranty</span>` : ""}${s.requirements.completeBy ? `<span class="chip">start by ${esc(s.requirements.completeBy)}</span>` : ""}</div>
+    </div>`).join("") : `<div class="card empty">No jobs open for bids right now. Fund a job, then invite pros.</div>`}</div>
+  <div class="section card"><div class="card-head"><div><h3>Booked jobs</h3><div class="small muted" style="margin-top:4px">Winning pros' slots · Bryntum Scheduler · US Central</div></div></div><div id="scheduler"></div></div>
   <div class="section card"><h3>Bring your own agent</h3><p class="small muted" style="margin:6px 0 10px">Any MCP-capable agent can discover funded jobs and submit sealed bids:</p>
-    <div class="mono" style="background:var(--cream);padding:12px;border-radius:12px">AEONITH_URL=… PROVIDER_ID=acme PROVIDER_NAME="Acme Plumbing" npm run mcp</div>
-    <div class="chips" style="margin-top:10px"><span class="chip">list_open_requests</span><span class="chip">submit_sealed_bid</span><span class="chip">reveal_bid</span><span class="chip">get_result</span></div></div>`;
+    <div class="codeblock">AEONITH_URL=… PROVIDER_ID=acme PROVIDER_NAME="Acme Plumbing" npm run mcp</div>
+    <div class="chips" style="margin-top:10px"><span class="chip lime">list_open_requests</span><span class="chip lime">submit_sealed_bid</span><span class="chip lime">reveal_bid</span><span class="chip lime">get_result</span></div></div>`;
 }
 async function mountScheduler() {
   const el = $("#scheduler");
@@ -439,12 +485,12 @@ async function mountScheduler() {
   const resources = [...new Map(jobs.map((r) => [r.award.providerId, { id: r.award.providerId, name: r.award.providerName }])).values()];
   const events = jobs.map((r) => {
     const o = r.reveals.find((v) => v.offer.providerId === r.award.providerId)?.offer;
-    return o && { id: r.id, resourceId: r.award.providerId, name: `${r.title}`, startDate: o.promises.startAt, endDate: o.promises.endAt, eventColor: r.status === "settled" ? "green" : "teal" };
+    return o && { id: r.id, resourceId: r.award.providerId, name: r.title, startDate: o.promises.startAt, endDate: o.promises.endAt, eventColor: r.status === "settled" ? "green" : "lime" };
   }).filter(Boolean);
   try {
     if (!document.querySelector("link[data-bryntum]")) {
       const l = document.createElement("link");
-      l.rel = "stylesheet"; l.href = matchMedia("(prefers-color-scheme: dark)").matches ? "/vendor/bryntum/svalbard-dark.css" : "/vendor/bryntum/svalbard-light.css"; l.dataset.bryntum = "1";
+      l.rel = "stylesheet"; l.href = "/vendor/bryntum/svalbard-dark.css"; l.dataset.bryntum = "1";
       document.head.append(l);
     }
     const { Scheduler } = await import("/vendor/bryntum/scheduler.module.js");
@@ -452,44 +498,60 @@ async function mountScheduler() {
     const start = new Date(first - 3 * 3600_000); start.setMinutes(0, 0, 0);
     if (scheduler) scheduler.destroy();
     scheduler = new Scheduler({
-      appendTo: el,
-      timeZone: "America/Chicago",
-      startDate: start,
-      endDate: new Date(start.getTime() + 2 * 86400_000),
-      viewPreset: "hourAndDay",
-      rowHeight: 58,
-      barMargin: 8,
+      appendTo: el, timeZone: "America/Chicago", startDate: start, endDate: new Date(start.getTime() + 2 * 86400_000),
+      viewPreset: "hourAndDay", rowHeight: 58, barMargin: 8, readOnly: true,
       columns: [{ text: "Pro", field: "name", width: innerWidth < 600 ? 120 : 190 }],
-      resources: resources.length ? resources : [{ id: "none", name: "No booked jobs yet" }],
-      events,
-      readOnly: true,
+      resources: resources.length ? resources : [{ id: "none", name: "No booked jobs yet" }], events,
     });
   } catch (e) {
     el.innerHTML = `<div class="empty">Scheduler unavailable: ${esc(e.message)}</div>`;
   }
 }
 
-// ---------- trust log ----------
-function viewTrust(audit) {
+// ---------- trust ----------
+function viewTrust() {
   const { verify, entries } = audit;
-  const label = (e) => ({
-    "request.created": "Request created", "request.joined": "Neighbour joined", "order.created": "PayPal order created (AUTHORIZE)", "hold.authorized": "PayPal hold placed",
-    "bidding.opened": "Bidding opened", "bid.committed": "Sealed bid committed", "bidding.closed": "Bidding closed", "bid.revealed": "Bid revealed & verified", "bid.reveal_rejected": "Bid reveal REJECTED",
-    "award.made": "Winner chosen (deterministic)", "award.none": "No feasible offer", "offer.reviewed": "AI promise check", "proof.challenge_issued": "Proof code issued", "proof.submitted": "Proof submitted",
-    "job.confirmed": "Homeowner confirmed", "hold.captured": "PayPal capture", "hold.voided": "PayPal hold released", "hold.reauthorized": "PayPal hold renewed", "payout.created": "PayPal payout to pro",
-    "settlement.approved": "Settlement approved", "request.released": "All holds released", blocked: "Policy gate BLOCKED", webhook: "PayPal webhook",
-  })[e.action] || e.action;
-  return `<div style="margin-bottom:14px"><div class="eyebrow">Tamper-evident</div><h2 style="margin-top:4px">Trust <span class="accent">log</span></h2>
-    <p class="muted" style="margin:6px 0 0;max-width:640px">Every bid, AI check, policy decision and PayPal call. Each entry carries the SHA-256 of the one before it, so editing history breaks the chain.</p></div>
+  return `<div style="margin-bottom:16px"><div class="eyebrow">Tamper-evident · SHA-256 chain</div><h2 style="margin-top:6px">Trust <span class="grad">log</span></h2>
+    <p class="muted" style="margin:8px 0 0;max-width:640px">Every bid, AI check, policy decision and PayPal call. Each entry carries the hash of the one before it, so editing history breaks the chain.</p></div>
   <div class="note ${verify.ok ? "ok" : "bad"}">${ic(verify.ok ? "check" : "x")}<div><b>${verify.ok ? "Chain intact" : `Chain broken at #${verify.brokenAt}`}</b> · ${verify.length} entries verified</div></div>
-  <div class="card section"><div class="timeline">${entries.slice().reverse().slice(0, 120).map((e) => {
+  <div class="card section"><div class="timeline">${entries.slice().reverse().slice(0, 150).map((e) => {
     const kind = e.actor.split(":")[0];
     const r = requests.find((x) => x.id === e.requestId);
     return `<div class="ev ${kind}"><div class="meta"><span class="chip">${esc(kind)}</span><span>#${e.seq}</span><span>${esc(when(e.at))}</span>${r ? `<a href="#/job/${r.id}">${esc(r.title)}</a>` : ""}</div>
-      <div class="what">${esc(label(e))}</div>
+      <div class="what">${esc(LABEL[e.action] || e.action)}</div>
       <div class="small muted">${esc(Object.entries(e.data || {}).filter(([k]) => k !== "signal").map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join(" · ")).slice(0, 260)}</div>
       <div class="mono muted" style="margin-top:4px">${esc(e.hash.slice(0, 16))}… ← ${esc(e.prevHash.slice(0, 16))}…</div></div>`;
   }).join("")}</div></div>`;
+}
+
+// ---------- motion helpers ----------
+function animateNumbers(root) {
+  root.querySelectorAll("[data-count]").forEach((el) => {
+    const target = Number(el.dataset.count) || 0;
+    if (reduceMotion || target === 0) return;
+    const t0 = performance.now();
+    const step = (now) => {
+      const k = Math.min(1, (now - t0) / 800);
+      const v = Math.round(target * (1 - Math.pow(1 - k, 3)));
+      const [i, d] = usd(v).split(".");
+      el.innerHTML = `${i}<span class="dec">.${d}</span>`;
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+  root.querySelectorAll(".ring .fill").forEach((c) => requestAnimationFrame(() => requestAnimationFrame(() => { c.style.strokeDashoffset = c.dataset.offset; })));
+}
+function scrambleHashes(root) {
+  if (reduceMotion) return;
+  const hex = "0123456789abcdef";
+  root.querySelectorAll(".scramble").forEach((el) => {
+    const real = el.dataset.hash;
+    const id = setInterval(() => {
+      if (!document.body.contains(el)) return clearInterval(id);
+      el.textContent = [...real].map((ch) => (Math.random() < 0.18 ? hex[(Math.random() * 16) | 0] : ch)).join("");
+    }, 90);
+    ui.timers.push(id);
+  });
 }
 
 // ---------- router ----------
@@ -499,13 +561,14 @@ function route() {
   return { name, id };
 }
 async function render() {
+  ui.timers.forEach(clearInterval);
+  ui.timers = [];
   const { name, id } = route();
   const view = $("#view");
-  const navId = name === "job" ? "jobs" : name;
-  renderNav(navId);
+  renderNav(name === "job" ? "jobs" : name);
   document.body.classList.remove("has-cta");
   $(".mobile-cta")?.remove();
-  if (name === "home") view.innerHTML = viewHome();
+  if (name === "home") { view.innerHTML = viewHome(); wireHome(); }
   else if (name === "jobs") view.innerHTML = viewJobs();
   else if (name === "job") {
     const r = requests.find((x) => x.id === id);
@@ -516,32 +579,40 @@ async function render() {
       if (next) {
         const bar = document.createElement("div");
         bar.className = "mobile-cta";
-        bar.innerHTML = `<button class="btn primary" data-next>${esc(next.label)}</button>`;
+        bar.innerHTML = `<button class="btn primary">${esc(next.label)} ${ic("arrow")}</button>`;
         document.body.append(bar);
         document.body.classList.add("has-cta");
-        bar.querySelector("[data-next]").addEventListener("click", (e) => runNext(r, next, e.currentTarget));
+        bar.querySelector("button").addEventListener("click", (e) => runNext(r, next, e.currentTarget));
       }
     }
+    ui.justRevealed = null;
   } else if (name === "new") { view.innerHTML = viewNew(); wireNew(); }
   else if (name === "pros") { view.innerHTML = `<div class="skeleton"></div>`; const s = await api("/protocol/v1/requests"); view.innerHTML = viewPros(s); mountScheduler(); }
-  else if (name === "trust") { view.innerHTML = `<div class="skeleton"></div>`; view.innerHTML = viewTrust(await api("/api/audit")); }
-  else location.hash = "#/home";
-  if (name === "home") wireHome();
+  else if (name === "trust") view.innerHTML = viewTrust();
+  else { location.hash = "#/home"; return; }
+  animateNumbers(view);
+  scrambleHashes(view);
 }
 
 function wireHome() {
   $("#ask")?.addEventListener("submit", (e) => {
     e.preventDefault();
     const q = new FormData(e.target).get("q");
-    draftState.text = q || undefined;
-    draftState.draft = null;
+    ui.text = q || undefined;
+    ui.draft = null;
     location.hash = "#/new";
-    if (q) setTimeout(() => $("#parse")?.click(), 50);
+    if (q) setTimeout(() => $("#parse")?.click(), 80);
   });
   document.querySelectorAll("[data-cat]").forEach((b) => b.addEventListener("click", () => {
-    const c = b.dataset.cat;
-    draftState.text = { plumbing: "Kitchen sink is leaking under the cabinet, need it fixed this week, max $250. Licensed plumber.", electrical: "Two outlets in the living room stopped working, max $200, licensed electrician.", hvac: "Furnace makes a loud noise and won't stay on, max $300, licensed.", gutters: "Gutter cleaning for 5 homes on our street before winter, max $130 each.", cleaning: "Deep clean of a 2-bed apartment this Saturday, max $220.", handyman: "Mount a TV and fix a sticking door, max $180." }[c];
-    draftState.draft = null;
+    ui.text = {
+      plumbing: "Kitchen sink is leaking under the cabinet, need it fixed this week, max $250. Licensed plumber.",
+      electrical: "Two outlets in the living room stopped working, max $200, licensed electrician.",
+      hvac: "Furnace makes a loud noise and won't stay on, max $300, licensed.",
+      gutters: "Gutter cleaning for 5 homes on our street before winter, max $130 each.",
+      cleaning: "Deep clean of a 2-bed apartment this Saturday, max $220.",
+      handyman: "Mount a TV and fix a sticking door, max $180.",
+    }[b.dataset.cat];
+    ui.draft = null;
     location.hash = "#/new";
   }));
 }
@@ -550,19 +621,16 @@ async function runNext(r, next, btn) {
   if (next.id === "scroll") { document.getElementById(next.target)?.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
   if (next.id === "hold") return startHold(r, next.buyer, btn);
   const map = {
-    run: async () => { const res = await post(`/api/requests/${r.id}/run-providers`); toast(`${res.length} pros sealed a bid`); },
-    close: async () => { await post(`/api/requests/${r.id}/close-bidding`); const out = await post(`/api/requests/${r.id}/award`); toast(out.award ? `${out.award.providerName} wins at ${usd(out.award.priceCents)}` : "No bid met your terms. Every hold was released."); },
+    run: async () => { const res = await post(`/api/requests/${r.id}/run-providers`); toast(`${res.length} pro agents sealed a bid`); },
+    close: async () => { await post(`/api/requests/${r.id}/close-bidding`); const out = await post(`/api/requests/${r.id}/award`); ui.justRevealed = r.id; toast(out.award ? `${out.award.providerName} wins at ${usd(out.award.priceCents)}` : "No bid met your terms. Every hold was released."); },
     challenge: () => post(`/api/requests/${r.id}/challenge`),
-    confirm: async () => { await post(`/api/requests/${r.id}/confirm`); toast("Confirmed. You can release the payment now."); },
+    confirm: async () => { await post(`/api/requests/${r.id}/confirm`); toast("Confirmed. Release the payment when ready."); },
     settle: async () => { await post(`/api/requests/${r.id}/settle`, { as: "buyer" }); toast("Paid on proof: captured on PayPal and paid out to the pro."); },
   };
   await act(btn, map[next.id]);
 }
 function startHold(r, bid, btn) {
-  return act(btn, async () => {
-    const o = await post(`/api/requests/${r.id}/buyers/${bid}/hold`);
-    location.href = o.approveUrl;
-  }, { rerender: false });
+  return act(btn, async () => { const o = await post(`/api/requests/${r.id}/buyers/${bid}/hold`); location.href = o.approveUrl; }, { rerender: false });
 }
 
 function wireJob(r) {
@@ -599,10 +667,10 @@ function wireJob(r) {
       });
     });
   }
-  v.querySelector("[data-overcharge]")?.addEventListener("click", (e) => act(e.currentTarget, async () => {
+  v.querySelectorAll("[data-overcharge]").forEach((b) => b.addEventListener("click", (e) => act(e.currentTarget, async () => {
     const res = await post(`/api/requests/${r.id}/try-overcharge`);
     toast(res.blocked ? `Blocked ✓ ${res.message}` : "Not blocked?!", 7000);
-  }));
+  })));
   v.querySelector("[data-release]")?.addEventListener("click", (e) => {
     const token = prompt("Admin token (ADMIN_TOKEN in .env)");
     if (token) act(e.currentTarget, () => post(`/api/requests/${r.id}/release`, {}, { "x-admin-token": token }));
@@ -611,8 +679,8 @@ function wireJob(r) {
 
 function wireNew() {
   $("#parse")?.addEventListener("click", (e) => {
-    draftState.text = $("#intake").value;
-    act(e.currentTarget, async () => { draftState.draft = await post("/api/intake", { text: draftState.text }); }, { rerender: false }).then(() => render());
+    ui.text = $("#intake").value;
+    act(e.currentTarget, async () => { ui.draft = await post("/api/intake", { text: ui.text }); }, { rerender: false }).then(() => render());
   });
   $("#draft")?.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -623,7 +691,7 @@ function wireNew() {
         licensed: f.get("licensed") === "on", minWarrantyMonths: Number(f.get("minWarrantyMonths") || 0), completeBy: f.get("completeBy") || "",
         buyerName: f.get("buyerName") || "You", limitDollars: Number(f.get("limitDollars")), units: Number(f.get("units") || 1),
       });
-      draftState.draft = null;
+      ui.draft = null;
       location.hash = `#/job/${out.request.id}`;
       toast("Request created. Approve your PayPal hold to fund it.");
     }, { rerender: false });
