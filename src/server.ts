@@ -154,6 +154,17 @@ app.post("/api/requests/:id/settle", wrap(async (req, res) => {
   if (as === "admin") requireAdmin(req);
   res.json(await app$.settle(req.params.id, as));
 }));
+app.post("/api/admin/reset", wrap(async (req, res) => {
+  requireAdmin(req);
+  // Releases any live holds first so nothing stays reserved at PayPal, then reseeds the demo.
+  for (const r of store.list()) {
+    if (r.buyers.some((b) => b.status === "held") && r.status !== "settled") await app$.releaseAll(r.id, "Demo reset").catch(() => {});
+  }
+  store.reset();
+  seedDemo(store);
+  res.json({ ok: true, requests: store.list().length });
+}));
+
 app.post("/api/requests/:id/release", wrap(async (req, res) => {
   requireAdmin(req);
   res.json(await app$.releaseAll(req.params.id, "Released by admin"));

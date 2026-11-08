@@ -361,7 +361,7 @@ select.input option { background: #1f0805; }
 .nolimit { display: flex; gap: 10px; align-items: center; padding: 12px 14px; border-radius: 14px; border: 1px solid rgba(126, 240, 168, .25); background: rgba(126, 240, 168, .06); font-weight: 600; font-size: 14px; color: var(--ok); }
 .nolimit svg { width: 18px; height: 18px; }
 .codeblock { font-family: var(--mono); font-size: 12px; background: #000; border: 1px solid var(--line); padding: 12px 14px; border-radius: 12px; color: var(--lime); overflow-x: auto; white-space: nowrap; }
-#scheduler { height: 300px; border-radius: var(--r-md); overflow: hidden; border: 1px solid var(--line); }
+#scheduler { height: 360px; border-radius: var(--r-md); overflow: hidden; border: 1px solid var(--line); }
 .timeline { position: relative; padding-left: 24px; }
 .timeline::before { content: ""; position: absolute; left: 7px; top: 8px; bottom: 8px; width: 1px; background: linear-gradient(var(--lime), rgba(255, 77, 109, .5), transparent); }
 .ev { position: relative; padding: 10px 0 12px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }

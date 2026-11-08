@@ -34,6 +34,14 @@ export class Store {
     renameSync(tmp, this.file);
   }
 
+  /** Wipe all demo state (requests, audit chain, seen photos). Used by the admin reset. */
+  reset() {
+    this.requests.clear();
+    this.audit = new AuditLog();
+    this.photoHashes.clear();
+    this.save();
+  }
+
   get(id: string): JobRequest | undefined {
     return this.requests.get(id);
   }

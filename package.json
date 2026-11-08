@@ -16,7 +16,8 @@
     "test": "tsx --test test/*.test.ts",
     "mcp": "tsx src/mcp.ts",
     "sandbox:check": "tsx scripts/sandbox-check.ts",
-    "webhook:register": "tsx scripts/register-webhook.ts"
+    "webhook:register": "tsx scripts/register-webhook.ts",
+    "demo": "tsx scripts/demo.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",

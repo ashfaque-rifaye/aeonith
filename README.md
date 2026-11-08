@@ -76,8 +76,22 @@ cp .env.example .env      # fill PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET (sandbo
 npm run dev               # http://localhost:3000
 npm test                  # 15 tests: clearing, commit–reveal, policy gate, audit chain, proof, reauthorize, full solo + group flows
 npm run sandbox:check     # confirms your PayPal sandbox keys work (prints no secrets)
+npm run demo              # with the server running: drives every flow end to end and fills the app with realistic jobs
 ```
-Without sandbox credentials the app runs in a clearly labelled **SIMULATED PayPal** mode, for local development only. Delete `data/state.json` to reset the demo.
+`npm run demo` resets the demo, then runs six real scenarios through the same HTTP API the UI uses, checking each result:
+
+| Scenario | Outcome |
+|---|---|
+| Electrical repair | Settled |
+| Furnace repair | A 6-month-warranty bid is filtered out and an agent overcharge is blocked, then settled |
+| Six-home gutter group | Group price, and one neighbour released |
+| TV mount over budget | No bid fits, so the hold is released at $0 |
+| Move-out clean | Pro booked, waiting on proof |
+| Maria's water heater | Left fresh for a live demo |
+
+In sandbox mode it prints each PayPal approval link and waits for you to approve as the sandbox buyer.
+
+Without sandbox credentials the app runs in a clearly labelled **SIMULATED PayPal** mode, for local development only. To reset, run `npm run demo` again or `POST /api/admin/reset` with the admin token.
 
 ### Sandbox accounts (US)
 | Role | Sandbox account |

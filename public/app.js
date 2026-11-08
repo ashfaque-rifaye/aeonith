@@ -526,14 +526,16 @@ async function mountScheduler() {
     }
     const { Scheduler } = await import("/vendor/bryntum/scheduler.module.js");
     const first = events.length ? Math.min(...events.map((e) => Date.parse(e.startDate))) : Date.now();
+    const lastEnd = events.length ? Math.max(...events.map((e) => Date.parse(e.endDate))) : Date.now();
     const start = new Date(first - 3 * 3600_000); start.setMinutes(0, 0, 0);
     if (scheduler) scheduler.destroy();
     scheduler = new Scheduler({
-      appendTo: el, timeZone: "America/Chicago", startDate: start, endDate: new Date(start.getTime() + 2 * 86400_000),
+      appendTo: el, timeZone: "America/Chicago", startDate: start, endDate: new Date(Math.max(start.getTime() + 2 * 86400_000, lastEnd + 3 * 3600_000)),
       viewPreset: "hourAndDay", rowHeight: 58, barMargin: 8, readOnly: true,
       columns: [{ text: "Pro", field: "name", width: innerWidth < 600 ? 120 : 190 }],
       resources: resources.length ? resources : [{ id: "none", name: "No booked jobs yet" }], events,
     });
+    if (events.length > 1) { try { scheduler.zoomToFit({ leftMargin: 60, rightMargin: 60 }); } catch { /* keep default zoom */ } }
   } catch (e) {
     el.innerHTML = `<div class="empty">Scheduler unavailable: ${esc(e.message)}</div>`;
   }
