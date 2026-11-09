@@ -74,11 +74,11 @@ Visual direction was inspired by the "Daily Bank" fintech concept by Nixtio on D
 npm install
 cp .env.example .env      # fill PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET (sandbox), ADMIN_TOKEN; ANTHROPIC_API_KEY optional
 npm run dev               # http://localhost:3000
-npm test                  # 15 tests: clearing, commit–reveal, policy gate, audit chain, proof, reauthorize, full solo + group flows
+npm test                  # 16 tests: clearing, commit–reveal, policy gate, audit chain, proof, reauthorize, full solo + group flows
 npm run sandbox:check     # confirms your PayPal sandbox keys work (prints no secrets)
 npm run demo              # with the server running: drives every flow end to end and fills the app with realistic jobs
 ```
-`npm run demo` resets the demo, then runs six real scenarios through the same HTTP API the UI uses, checking each result:
+`npm run demo` resets the demo, then runs eight real scenarios through the same HTTP API the UI uses, checking each result:
 
 | Scenario | Outcome |
 |---|---|
@@ -87,7 +87,11 @@ npm run demo              # with the server running: drives every flow end to en
 | Six-home gutter group | Group price, and one neighbour released |
 | TV mount over budget | No bid fits, so the hold is released at $0 |
 | Move-out clean | Pro booked, waiting on proof |
+| **Car pool**: 5 buyers, same model, one dealership | Each buyer holds only a **$500 refundable deposit**. Dealer agents seal per-car bids, the deposit is applied at delivery, and the balance is due at handover at the sealed price |
+| **Bulk items**: 8 parents, one Chromebook order | Batch price $267 against ~$349 retail; one parent released |
 | Maria's water heater | Left fresh for a live demo |
+
+The same loop covers services *and* goods (cars, appliances, solar, school orders, small-business restock). See [docs/USE_CASES.md](docs/USE_CASES.md) for every use case, how each PayPal API is used, and **how PayPal earns** from the system.
 
 In sandbox mode it prints each PayPal approval link and waits for you to approve as the sandbox buyer.
 
@@ -116,7 +120,7 @@ Tools: `list_open_requests`, `submit_sealed_bid`, `reveal_bid`, `get_result`.
 - Sandbox only. Not legal advice.
 
 ## Docs
-[Solution design](docs/SOLUTION_DESIGN.md) · [Deep analysis](docs/DEEP_ANALYSIS.md) · [Research](docs/CONCEPT_BRIEF.md) · [Security](SECURITY.md) · [Hackathon notes](HACKATHON.md)
+[Solution design](docs/SOLUTION_DESIGN.md) · [Use cases & PayPal revenue](docs/USE_CASES.md) · [Deep analysis](docs/DEEP_ANALYSIS.md) · [Research](docs/CONCEPT_BRIEF.md) · [Security](SECURITY.md) · [Hackathon notes](HACKATHON.md)
 
 ## License
 [MIT](LICENSE)

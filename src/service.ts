@@ -2,7 +2,7 @@ import { decideOffer } from "./agents/providers.js";
 import type { Agent } from "./ai/agent.js";
 import { clear, fmt, toCents } from "./core/clearing.js";
 import { commitmentHash, newSalt, verifyReveal } from "./core/commit.js";
-import { enforce, PolicyViolation } from "./core/policy.js";
+import { capturePerUnit, enforce, holdPerUnit, PolicyViolation } from "./core/policy.js";
 import { codeChecks, inspectImage, newChallengeCode, verdict } from "./core/proof.js";
 import type { BuyerHold, Commitment, JobRequest, Offer, Provider } from "./domain/types.js";
 import type { PaymentRail } from "./paypal/rail.js";
@@ -63,6 +63,7 @@ export class Aeonith {
     buyerName: string;
     limitDollars: number;
     units: number;
+    depositDollars?: number;
     closesInHours?: number;
   }) {
     const limitCents = toCents(input.limitDollars);
@@ -76,6 +77,11 @@ export class Aeonith {
       requirements: { licensed: input.licensed, minWarrantyMonths: input.minWarrantyMonths, completeBy: input.completeBy },
       closesInHours: input.closesInHours ?? (input.mode === "solo" ? 24 : 48),
     });
+    if (input.depositDollars) {
+      const dep = toCents(input.depositDollars);
+      if (dep <= 0 || dep > limitCents) throw new HttpError(400, "Deposit must be positive and no more than your limit");
+      r.depositPerUnitCents = dep;
+    }
     const b = newBuyer(input.buyerName || "You", limitCents, Math.max(1, Math.min(input.units || 1, 20)));
     r.buyers.push(b);
     this.store.requests.set(r.id, r);
@@ -103,12 +109,12 @@ export class Aeonith {
     const b = r.buyers.find((x) => x.id === String(bid));
     if (!b) throw new HttpError(404, "Buyer not found");
     if (b.status === "held") throw new HttpError(409, "Already held");
-    const amountCents = b.limitCents * b.units;
+    const amountCents = holdPerUnit(r, b) * b.units;
     this.gate({ kind: "HOLD", request: r, buyer: b, amountCents, maxAuthCents: this.d.maxAuthCents }, r.id);
     const order = await this.d.paypal.createAuthorizeOrder({
       amount: fmt(amountCents),
       currency: this.d.currency,
-      description: `Aeonith hold: ${r.title} (released unless the job is done)`,
+      description: r.depositPerUnitCents ? `Aeonith refundable deposit: ${r.title} (released unless delivered)` : `Aeonith hold: ${r.title} (released unless the job is done)`,
       customId: `${r.id}:${b.id}`,
       returnUrl: `${this.d.appBaseUrl}/paypal/return`,
       cancelUrl: `${this.d.appBaseUrl}/paypal/cancel`,
@@ -126,7 +132,7 @@ export class Aeonith {
     const { request: r, buyer: b } = found;
     if (b.status === "held") return { request: r, buyer: b };
     const auth = await this.d.paypal.authorizeOrder(orderId);
-    const expected = b.limitCents * b.units;
+    const expected = holdPerUnit(r, b) * b.units;
     const got = toCents(auth.amount);
     if (got !== expected || auth.currency !== this.d.currency) {
       // Never trust an amount we didn't set: release it.
@@ -333,7 +339,7 @@ export class Aeonith {
         voids.push({ buyerId: b.id, reason: "Not in the winning deal" });
         continue;
       }
-      const amount = award.priceCents * b.units;
+      const amount = capturePerUnit(r, award.priceCents) * b.units;
       this.gate({ kind: "CAPTURE", request: r, buyer: b, amountCents: amount, approvedBy }, r.id);
       await this.refreshHoldIfStale(r, b);
       const cap = await this.d.paypal.captureAuthorization(b.authorizationId!, fmt(amount), this.d.currency, `cap-${b.authorizationId}`);
@@ -354,13 +360,17 @@ export class Aeonith {
         receiver,
         amount: fmt(capturedTotal - fee),
         currency: this.d.currency,
-        note: `Aeonith: verified job "${r.title}" (${captures.length} home${captures.length === 1 ? "" : "s"})`,
+        note: r.depositPerUnitCents ? `Aeonith: deposits for delivered "${r.title}" (${captures.length} unit${captures.length === 1 ? "" : "s"})` : `Aeonith: verified job "${r.title}" (${captures.length} home${captures.length === 1 ? "" : "s"})`,
         senderBatchId: `payout-${r.id}`,
       });
       payout = { batchId: p.batchId, amountCents: capturedTotal - fee, feeCents: fee, receiver, status: p.status };
       this.log("paypal", "payout.created", { batchId: p.batchId, amount: fmt(capturedTotal - fee), fee: fmt(fee), receiver }, r.id);
     }
-    r.settlement = { at: new Date().toISOString(), captures, voids, payout };
+    const balanceDueCents = r.depositPerUnitCents
+      ? r.buyers.filter((b) => award.buyersIn.includes(b.id) && b.status === "captured").reduce((s, b) => s + (award.priceCents - (b.capturedCents ?? 0) / b.units) * b.units, 0)
+      : undefined;
+    if (balanceDueCents) this.log("engine", "balance.due_at_handover", { balance: fmt(balanceDueCents), seller: award.providerName }, r.id);
+    r.settlement = { at: new Date().toISOString(), captures, voids, payout, balanceDueCents };
     r.status = "settled";
     this.log(approvedBy, "settlement.approved", { captured: fmt(capturedTotal) }, r.id);
     this.store.save();

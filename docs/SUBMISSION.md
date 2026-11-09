@@ -29,6 +29,19 @@ AI shopping agents could help, but a 2026 study showed that when an agent chats 
 
 **Together mode:** neighbours who need the same job join with their own holds. A provider's single trip makes the per-home price lower, everyone pays the same price, anyone below it is released, and a **best-of guarantee** means you never pay more than a solo quote you already have.
 
+**Beyond services: item pools.** The same loop works for goods:
+- **Car pool:** five buyers want the same model and trim from one dealership. Each holds only a **$500 refundable deposit**, while their private max price decides whether they're in. Dealer agents seal per-car bids, and the winner gets 4 committed buyers at **$31,980/car**. At delivery (a VIN photo with the one-time code) the deposits are captured and applied, and the balance is paid at the sealed price.
+- **Bulk order:** eight parents buy the same Chromebook at **$267** against ~$349 retail.
+- **Next:** appliances, solar group buys, school orders and small-business restock.
+
+**How PayPal earns:**
+- a processing fee on every capture
+- a Payouts fee on every seller payment
+- Pay Later on big-ticket balances
+- new PayPal accounts on both sides: every pool member approves a PayPal hold, and every seller is onboarded as a PayPal merchant
+
+The eight demo scenarios move about $4,976 through 18 captures and 5 payouts, worth roughly $244 in PayPal fees. Full breakdown: `docs/USE_CASES.md`.
+
 ### How we built it
 - **PayPal (sandbox):**
   - Orders v2 `AUTHORIZE`
@@ -44,7 +57,7 @@ AI shopping agents could help, but a 2026 study showed that when an agent chats 
   - a **hash-chained, tamper-evident audit log**
   - a Sybil check for duplicate provider identities
 - **Experience:** a real-time **three.js** 3D claw that *holds your card* and follows the job (grips when held, sparks during bidding, scans during proof, drops the card to the pro on payment), plus **GSAP** motion and **Bryntum Scheduler** for booked jobs.
-- **Stack:** Node 22, TypeScript, Express 5, Zod 4. 15 automated tests cover clearing, commit–reveal, the policy gate, the audit chain, proof, reauthorization, and the full solo and group flows.
+- **Stack:** Node 22, TypeScript, Express 5, Zod 4. 16 automated tests cover clearing, commit–reveal, the policy gate, the audit chain, proof, reauthorization, and the full solo, group and car-pool (deposit) flows.
 
 ### Challenges
 - Making the money path impossible for an AI to bend: seller text never reaches payment code; only schema-checked offers do, and PayPal itself refuses captures above the hold.

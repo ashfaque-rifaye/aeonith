@@ -98,7 +98,7 @@ test("policy gate: blocks over-capture, wrong price, missing proof, missing appr
     () => enforce({ kind: "PAYOUT", request: r, amountCents: 40000, receiver: "g", expectedReceiver: "g", capturedTotalCents: 36000 }),
     /captured/,
   );
-  assert.throws(() => enforce({ kind: "HOLD", request: { ...r, status: "open" } as JobRequest, buyer: b, amountCents: 50000, maxAuthCents: 100000 }), /limit × units/);
+  assert.throws(() => enforce({ kind: "HOLD", request: { ...r, status: "open" } as JobRequest, buyer: b, amountCents: 50000, maxAuthCents: 100000 }), /hold must equal limit/);
   assert.throws(() => enforce({ kind: "HOLD", request: { ...r, status: "open" } as JobRequest, buyer: b, amountCents: 40000, maxAuthCents: 30000 }), /cap/);
 });
 

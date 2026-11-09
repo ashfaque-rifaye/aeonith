@@ -50,6 +50,9 @@ const P = {
   receipt: "M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6",
   terminal: "M4 5h16v14H4zM8 10l2 2-2 2M12 14h4",
   arrow: "M5 12h14M13 6l6 6-6 6",
+  car: "M5 16h14M3 16v-3l2-5h14l2 5v3M7 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3M17 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3M5 12h14",
+  box: "M3 7.5 12 3l9 4.5v9L12 21l-9-4.5zM3 7.5 12 12l9-4.5M12 12v9",
+  fridge: "M6 3h12v18H6zM6 10h12M9 6v2M9 13v3",
   vault: "M4 5h16v14H4zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6M12 9V7M12 17v-2M4 9h2M4 15h2",
 };
 const ic = (name, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${P[name] || P.info}"/></svg>`;
@@ -61,10 +64,18 @@ const CAT = {
   cleaning: { icon: "broom", tint: "rgba(255,143,177,.35)", label: "Cleaning" },
   handyman: { icon: "wrench", tint: "rgba(255,122,61,.35)", label: "Handyman" },
   landscaping: { icon: "leaf", tint: "rgba(255,194,154,.35)", label: "Yard" },
+  vehicles: { icon: "car", tint: "rgba(255,122,61,.35)", label: "Cars", unit: "car", pool: true },
+  electronics: { icon: "box", tint: "rgba(255,209,102,.35)", label: "Electronics", unit: "item", pool: true },
+  appliances: { icon: "fridge", tint: "rgba(255,194,154,.35)", label: "Appliances", unit: "item", pool: true },
   moving: { icon: "truck", tint: "rgba(255,209,102,.35)", label: "Moving" },
   other: { icon: "wrench", tint: "rgba(255,122,61,.35)", label: "Other" },
 };
 const cat = (c) => CAT[c] || CAT.other;
+/** Unit noun for a request ("home" for services, "car" / "item" for item pools). */
+const unitOf = (r) => cat(r.category).unit || "home";
+/** One buyer's PayPal hold: their limit, or the refundable deposit for big-ticket item pools. Mirrors the server policy. */
+const holdOf = (r, b) => (r.depositPerUnitCents ?? b.limitCents) * b.units;
+const capOf = (r, price) => (r.depositPerUnitCents ? Math.min(r.depositPerUnitCents, price) : price);
 
 // ---------- state / api ----------
 let health = null;
@@ -170,6 +181,16 @@ const feedLines = (entries, n = 8) => entries.slice(-n).reverse().map((e) => {
   return `<div class="ln"><span class="t">${hhmm(e.at)}</span><span><span class="k ${KIND[k] || ""}">${esc(k)}</span> ${esc(LABEL[e.action] || e.action)}${esc(extra)}</span></div>`;
 }).join("");
 
+// ---------- use cases (home page) ----------
+const USE_CASES = [
+  { icon: "bolt", cat: "electrical", mode: "solo", live: true, title: "Solo repair", story: "One person, one job. Licensed pros' agents compete for it; you never haggle on the doorstep.", example: "Outlets: $224 vs $260 max", paypal: "Authorize → partial capture" },
+  { icon: "gutter", cat: "gutters", mode: "together", live: true, title: "Street group", story: "Neighbours fund the same job. One trip serves every home, so everyone gets the same lower price.", example: "$118/home vs $160 solo", paypal: "Many holds → many captures" },
+  { icon: "car", cat: "vehicles", live: true, preset: true, title: "Car pool, one dealership", story: "Five buyers want the same model and trim. Dealers' agents seal a per-car price for the whole group. Each buyer holds only a refundable deposit.", example: "$31,980/car vs $33k max", paypal: "$500 deposit hold → applied at delivery" },
+  { icon: "box", cat: "electronics", live: true, preset: true, title: "Bulk items", story: "Parents, clubs or small offices pool an order of identical items. Retail agents bid for the batch; delivery photo releases the money.", example: "Chromebooks $267 vs $349", paypal: "Full-price holds → captures + Payouts" },
+  { icon: "fridge", cat: "appliances", preset: true, title: "Appliances & upgrades", story: "Heat pumps, water heaters, EV chargers: a neighbourhood pools rebate-eligible upgrades and gets an installer's volume price.", example: "Hardware + install, one deal", paypal: "Pay Later on the balance" },
+  { icon: "users", cat: "other", title: "Small-business restock", story: "Cafés and shops on one street pool supply orders (cups, beans, packaging) so a small buyer gets a big buyer's price.", example: "Monthly pooled orders", paypal: "Vault + recurring holds" },
+];
+
 // ---------- home ----------
 function viewHome() {
   const held = requests.reduce((s, r) => s + heldNow(r), 0);
@@ -188,7 +209,7 @@ function viewHome() {
   const avgSaving = settledJobs.length ? Math.round(settledJobs.reduce((s, r) => s + r.award.buyerSavingCents / Math.max(1, r.award.unitsServed), 0) / settledJobs.length) : 0;
   return `
   <section class="hero-ember">
-    <div class="stage" id="stage" data-state="${st === "idle" ? "held" : st}" data-agents="${Math.max(3, latest?.commitments.length || 3)}" data-winner="${latest ? winnerIndex(latest) : 0}" data-amount="${esc(usd(latest ? (heldNow(latest) || latest.buyers.reduce((s, b) => s + b.limitCents * b.units, 0)) : 0))}" data-label="${esc(st === "idle" ? "your private limit" : st === "settled" ? "paid on proof" : st === "released" ? "released · $0 charged" : "held · not paid")}">
+    <div class="stage" id="stage" data-state="${st === "idle" ? "held" : st}" data-agents="${Math.max(3, latest?.commitments.length || 3)}" data-winner="${latest ? winnerIndex(latest) : 0}" data-amount="${esc(usd(latest ? (heldNow(latest) || latest.buyers.reduce((s, b) => s + holdOf(latest, b), 0)) : 0))}" data-label="${esc(st === "idle" ? "your private limit" : st === "settled" ? "paid on proof" : st === "released" ? "released · $0 charged" : "held · not paid")}">
       <div class="hud h1" data-float><span class="dotc">${ic("lock")}</span><div><small>Held in PayPal</small><b>${money(held, { count: true })}</b></div></div>
     </div>
     <div class="hero-inner">
@@ -235,6 +256,19 @@ function viewHome() {
     </section>
   </div>
 
+
+  <div class="sec-head"><div><div class="eyebrow">Use cases</div><h2 style="margin-top:6px">One loop, <span class="grad">many markets</span></h2></div><span class="small muted">hold · sealed bids · proof · pay, for services and goods</span></div>
+  <div class="usegrid" data-stagger>${USE_CASES.map((u) => {
+    const live = requests.find((r) => r.category === u.cat && (u.mode ? r.mode === u.mode : true));
+    return `<div class="card use" data-tilt>
+      <div class="row-between"><span class="ico">${ic(u.icon)}</span><span class="chip ${u.live ? "lime" : ""}">${u.live ? "live in demo" : "same engine · next"}</span></div>
+      <h3>${esc(u.title)}</h3>
+      <p>${esc(u.story)}</p>
+      <div class="use-kv"><div><small>Example</small><b>${esc(u.example)}</b></div><div><small>PayPal</small><b>${esc(u.paypal)}</b></div></div>
+      ${live ? `<a class="btn ghost" href="#/job/${live.id}">Open the live job ${ic("arrow")}</a>` : u.preset ? `<button class="btn ghost" data-cat="${u.cat}">Try it ${ic("arrow")}</button>` : ""}
+    </div>`;
+  }).join("")}</div>
+
   <div class="sec-head"><div><div class="eyebrow">How it works</div><h2 style="margin-top:6px">Compete · hold · prove · <span class="grad">pay</span></h2></div></div>
   <div class="howgrid" data-stagger>
     <div class="card how" data-tilt><span class="icon3">${ic("lock")}</span><span class="n">01 · HOLD</span><h3>One PayPal hold</h3><p>Approve your limit once. It's reserved in PayPal, not paid to anyone, and pros never see the number.</p></div>
@@ -250,7 +284,7 @@ function jobRow(r) {
   const total = r.buyers.reduce((s, b) => s + b.units, 0);
   return `<a class="job" href="#/job/${r.id}">
     <span class="ico">${ic(c.icon)}</span>
-    <div><h3>${esc(r.title)}</h3><div class="meta">${c.label.toLowerCase()} · ${esc(r.zip || "n/a")} · ${r.mode === "together" ? `${fu}/${total} homes funded` : "solo"}</div>
+    <div><h3>${esc(r.title)}</h3><div class="meta">${c.label.toLowerCase()} · ${esc(r.zip || "n/a")} · ${r.mode === "together" ? `${fu}/${total} ${unitOf(r)}s funded` : "solo"}</div>
       ${r.mode === "together" ? `<div class="bar"><i style="width:${total ? (fu / total) * 100 : 0}%"></i></div>` : ""}</div>
     <div class="right">${statusChip(r)}${r.award ? `<span class="price">${money(r.award.priceCents)}</span>` : `<span class="small muted">${r.commitments.length} sealed</span>`}</div>
   </a>`;
@@ -306,7 +340,7 @@ function viewJob(r) {
 function nextAction(r) {
   const pending = r.buyers.find((b) => b.status === "pending");
   const anyHeld = r.buyers.some((b) => b.status === "held");
-  if (["open", "bidding"].includes(r.status) && r.mode === "solo" && pending) return { id: "hold", label: `Hold ${usd0(pending.limitCents * pending.units)} with PayPal`, buyer: pending.id };
+  if (["open", "bidding"].includes(r.status) && r.mode === "solo" && pending) return { id: "hold", label: `Hold ${usd0(holdOf(r, pending))}${r.depositPerUnitCents ? " deposit" : ""} with PayPal`, buyer: pending.id };
   if (["open", "bidding"].includes(r.status) && anyHeld && r.commitments.length === 0) return { id: "run", label: "Invite pros' agents to bid" };
   if (r.status === "bidding" && r.commitments.length) return { id: "close", label: "Unseal bids & pick winner" };
   if (["open", "bidding"].includes(r.status) && r.mode === "together" && pending) return { id: "scroll", target: "people", label: "Neighbours: approve holds" };
@@ -319,7 +353,7 @@ function nextAction(r) {
 
 function vault(r) {
   const mine = r.mode === "solo" ? r.buyers[0] : null;
-  const heldAmt = r.mode === "solo" ? (mine?.authorizedCents ?? (mine?.limitCents ?? 0) * (mine?.units || 1)) : r.buyers.filter((b) => b.authorizedCents).reduce((s, b) => s + b.authorizedCents, 0);
+  const heldAmt = r.mode === "solo" ? (mine?.authorizedCents ?? (mine ? holdOf(r, mine) : 0)) : r.buyers.filter((b) => b.authorizedCents).reduce((s, b) => s + b.authorizedCents, 0);
   const charged = r.buyers.reduce((s, b) => s + (b.capturedCents || 0), 0);
   const isHeld = r.buyers.some((b) => b.status === "held");
   const proven = r.status === "proving" && (r.proof?.verdict === "pass" || !!r.buyerConfirmedAt);
@@ -328,17 +362,21 @@ function vault(r) {
   const next = nextAction(r);
   let eyebrow, amount, sub, state;
   const finalTotal = r.award ? r.award.priceCents * r.award.unitsServed : 0;
-  if (r.status === "settled") { eyebrow = "Paid on proof"; amount = charged; sub = `${usd(heldAmt - charged)} returned to ${r.mode === "solo" ? "you" : "neighbours"}`; state = ["check", "released on proof"]; }
+  const dep = r.depositPerUnitCents;
+  if (r.status === "settled" && dep) { eyebrow = "Deposits applied"; amount = charged; sub = `${usd(r.settlement?.balanceDueCents)} balance paid to the seller at handover`; state = ["check", "applied on delivery"]; }
+  else if (r.status === "settled") { eyebrow = "Paid on proof"; amount = charged; sub = `${usd(heldAmt - charged)} returned to ${r.mode === "solo" ? "you" : "neighbours"}`; state = ["check", "released on proof"]; }
   else if (r.status === "released") { eyebrow = "Released"; amount = 0; sub = "Every hold voided. Nobody was charged."; state = ["x", "nothing charged"]; }
-  else if (isHeld) { eyebrow = r.mode === "solo" ? "Your money is held" : "Held across the street"; amount = heldNow(r) || heldAmt; sub = r.award ? `Final ${usd(r.award.priceCents)}${r.mode === "together" ? "/home" : ""}. Never more than you held.` : "Reserved in PayPal, not paid to anyone."; state = ["lock", "held · not paid"]; }
-  else { eyebrow = r.mode === "solo" ? "Your private limit" : "Group limits"; amount = r.buyers.reduce((s, b) => s + b.limitCents * b.units, 0); sub = "Pros never see this number."; state = ["shield", "private"]; }
+  else if (isHeld) { eyebrow = r.mode === "solo" ? "Your money is held" : "Held across the street"; amount = heldNow(r) || heldAmt; sub = r.award ? (dep ? `Final ${usd(r.award.priceCents)}/${unitOf(r)}. Only the deposit is captured, at delivery.` : `Final ${usd(r.award.priceCents)}${r.mode === "together" ? `/${unitOf(r)}` : ""}. Never more than you held.`) : dep ? `Refundable ${usd0(dep)} deposit per ${unitOf(r)}, not paid to anyone.` : "Reserved in PayPal, not paid to anyone."; state = ["lock", "held · not paid"]; }
+  else { eyebrow = r.mode === "solo" ? "Your private limit" : "Group limits"; amount = r.buyers.reduce((s, b) => s + holdOf(r, b), 0); sub = dep ? "Deposits to hold. Sellers never see anyone's max price." : "Pros never see this number."; state = ["shield", "private"]; }
   const pct = r.status === "settled" ? (heldAmt ? charged / heldAmt : 1) : r.award && heldAmt ? Math.min(1, finalTotal / heldAmt) : isHeld ? 1 : 0;
   const C = 2 * Math.PI * 38;
   const ringLbl = r.award ? `<b>${Math.round(pct * 100)}%</b>of hold` : isHeld ? `<b>100%</b>held` : `<b>n/a</b>no hold`;
   const lines = [];
   if (r.award) lines.push(["Winning bid", `${usd(r.award.priceCents)}${r.mode === "together" ? ` × ${r.award.unitsServed}` : ""}`]);
   if (r.settlement?.payout) lines.push(["Paid to pro", usd(r.settlement.payout.amountCents)], ["Platform fee", usd(r.settlement.payout.feeCents)]);
-  if (r.award && r.status !== "settled") lines.push([r.mode === "solo" ? "You keep" : "Returned at capture", usd(r.buyers.filter((b) => r.award.buyersIn.includes(b.id)).reduce((s, b) => s + (b.authorizedCents ?? 0) - r.award.priceCents * b.units, 0))]);
+  if (r.award && dep) lines.push(["Deposit applied", `${usd(capOf(r, r.award.priceCents))} × ${r.award.unitsServed}`], ["Saved vs. max prices", usd(r.award.buyerSavingCents)]);
+  if (r.settlement?.balanceDueCents) lines.push(["Balance at handover", usd(r.settlement.balanceDueCents)]);
+  if (r.award && r.status !== "settled" && !dep) lines.push([r.mode === "solo" ? "You keep" : "Returned at capture", usd(r.buyers.filter((b) => r.award.buyersIn.includes(b.id)).reduce((s, b) => s + (b.authorizedCents ?? 0) - r.award.priceCents * b.units, 0))]);
   return `<div class="vault fade-in">
     <div class="vault3d" data-vault3d data-amount="${esc(usd(amount))}" data-label="${esc(state[1])}" data-state="${sceneState(r)}" data-agents="${Math.max(3, r.commitments.length || 3)}" data-winner="${winnerIndex(r)}"><span class="tag">${esc(state[1])}</span></div>
     <div class="top">
@@ -360,21 +398,21 @@ function peopleCard(r) {
     const st = { held: ["ok", "held"], captured: ["ok", `paid ${usd(b.capturedCents)}`], voided: ["warn", "released · $0"], failed: ["bad", "failed"], pending: ["", "not held"] }[b.status];
     return `<div class="person">
       <span class="avatar" style="background:${tint(b.name)}">${esc(initials(b.name))}</span>
-      <div class="who"><b>${esc(b.name)}</b><small>limit ${usd0(b.limitCents)} · private${b.soloBestCents ? ` · solo quote ${usd0(b.soloBestCents)}` : ""}${b.authorizationId ? ` · ${esc(b.authorizationId)}` : ""}</small>${b.note ? `<small style="color:var(--amber)">${esc(b.note)}</small>` : ""}</div>
+      <div class="who"><b>${esc(b.name)}</b><small>${r.depositPerUnitCents ? "max price" : "limit"} ${usd0(b.limitCents)} · private${b.soloBestCents ? ` · solo quote ${usd0(b.soloBestCents)}` : ""}${b.authorizationId ? ` · ${esc(b.authorizationId)}` : ""}</small>${b.note ? `<small style="color:var(--amber)">${esc(b.note)}</small>` : ""}</div>
       <div class="act"><span class="chip ${st[0]}">${st[1]}</span>
-        ${b.status === "pending" && open ? `<button class="btn primary" data-hold="${b.id}">${ic("lock")}Hold ${usd0(b.limitCents * b.units)}</button>` : ""}
+        ${b.status === "pending" && open ? `<button class="btn primary" data-hold="${b.id}">${ic("lock")}Hold ${usd0(holdOf(r, b))}${r.depositPerUnitCents ? " deposit" : ""}</button>` : ""}
         ${b.status === "held" && open ? `<button class="btn ghost" data-cancel="${b.id}">Cancel hold</button>` : ""}</div>
     </div>`;
   }).join("");
   const join = r.mode === "together" && open ? `
     <form class="form-grid" data-join style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
       <label class="field">Neighbour name<input class="input" name="name" required placeholder="Jordan" /></label>
-      <label class="field">Private limit per home ($)<input class="input" name="limitDollars" type="number" min="1" inputmode="decimal" required /></label>
+      <label class="field">${r.depositPerUnitCents ? `Private max price per ${unitOf(r)} ($)` : "Private limit per home ($)"}<input class="input" name="limitDollars" type="number" min="1" inputmode="decimal" required /></label>
       <label class="field">Solo quote already in hand ($, optional)<input class="input" name="soloBestDollars" type="number" min="1" inputmode="decimal" /></label>
       <div class="field" style="justify-content:flex-end"><button class="btn" type="submit">${ic("plus")}Join this group</button></div>
     </form>` : "";
   return `<div class="card fade-in" id="people">
-    <div class="card-head"><div><h3>${r.mode === "solo" ? "Funded request" : "Neighbours"}</h3><div class="small muted" style="margin-top:4px">${r.mode === "solo" ? "One PayPal approval. Charged only on proof, at the final price." : "Each home approves its own hold. Below the final price → released, never charged."}</div></div>
+    <div class="card-head"><div><h3>${r.mode === "solo" ? "Funded request" : cat(r.category).pool ? "Buyers in the pool" : "Neighbours"}</h3><div class="small muted" style="margin-top:4px">${r.depositPerUnitCents ? `Each buyer holds a refundable ${usd0(r.depositPerUnitCents)} deposit. Max price at or above the winning bid: in. Below: released, never charged.` : r.mode === "solo" ? "One PayPal approval. Charged only on proof, at the final price." : "Each home approves its own hold. Below the final price → released, never charged."}</div></div>
       ${r.mode === "together" ? `<span class="chip lime">${fundedUnits(r)}/${r.buyers.length} funded</span>` : ""}</div>
     <div class="people">${rows}</div>${join}
   </div>`;
@@ -397,7 +435,7 @@ function bidsCard(r) {
       <div class="head"><span class="avatar" style="background:${tint(c.providerName)}">${esc(initials(c.providerName))}</span>
         <div style="min-width:0"><b>${esc(c.providerName)}</b><div class="small muted mono">ai agent · simulated</div></div></div>
       ${!rev ? `<div class="sealed"><div class="lockrow">${ic("lock")}sealed · sha-256</div><div class="scramble" data-hash="${esc(c.hash)}">${esc(c.hash)}</div></div>`
-        : `<div><span class="price">${money(o.priceCents)}</span><span class="muted small">${o.minUnits > 1 ? ` /home · min ${o.minUnits}` : ""}</span></div>
+        : `<div><span class="price">${money(o.priceCents)}</span><span class="muted small">${o.minUnits > 1 ? ` /${unitOf(r)} · min ${o.minUnits}` : ""}</span></div>
            <div class="chips">${o.promises.licensed ? `<span class="chip ok">${ic("shield")}${esc(o.promises.licenseNo)}</span>` : `<span class="chip bad">${ic("x")}unlicensed</span>`}
              <span class="chip">${o.promises.warrantyMonths}-mo warranty</span><span class="chip">${ic("clock")}${esc(when(o.promises.startAt, { minute: undefined, month: undefined, day: undefined }))}</span></div>
            <div>${rev.valid ? `<span class="chip lime">${ic("check")}matches sealed hash</span>` : `<span class="chip bad">${esc(rev.rejectReason)}</span>`}</div>
@@ -452,13 +490,13 @@ function receiptCard(r) {
   const s = r.settlement;
   const lines = r.buyers.map((b) => {
     const cap = s.captures.find((c) => c.buyerId === b.id);
-    const held = b.authorizedCents ?? b.limitCents * b.units;
+    const held = b.authorizedCents ?? holdOf(r, b);
     return `<div class="rline"><div><b>${esc(b.name)}</b><div class="small muted mono">held ${usd(held)}${cap ? ` · ${esc(cap.captureId)}` : ` · ${esc(b.note || "released")}`}</div></div>
-      <div class="r"><b>${money(cap ? cap.amountCents : 0)}</b><div class="small" style="color:var(--ok)">${usd(cap ? held - cap.amountCents : held)} back</div></div></div>`;
+      <div class="r"><b>${money(cap ? cap.amountCents : 0)}</b><div class="small" style="color:var(--ok)">${r.depositPerUnitCents && cap ? `deposit applied · ${usd(r.award.priceCents * b.units - cap.amountCents)} due at handover` : `${usd(cap ? held - cap.amountCents : held)} back`}</div></div></div>`;
   }).join("");
   return `<div class="card fade-in"><div class="card-head"><div><div class="eyebrow">Receipt</div><h3 style="margin-top:6px">Settled on PayPal</h3></div>${ic("receipt")}</div>
     <div>${lines}</div>
-    ${s.payout ? `<div class="note ok" style="margin-top:12px">${ic("check")}<div><b>${usd(s.payout.amountCents)} paid out to ${esc(r.award.providerName)}</b> via PayPal Payouts (fee ${usd(s.payout.feeCents)}).<div class="small mono" style="margin-top:4px">batch ${esc(s.payout.batchId)} · ${esc(s.payout.status)}</div></div></div>` : ""}</div>`;
+    ${s.payout ? `<div class="note ok" style="margin-top:12px">${ic("check")}<div><b>${usd(s.payout.amountCents)} paid out to ${esc(r.award.providerName)}</b> via PayPal Payouts (fee ${usd(s.payout.feeCents)}).${s.balanceDueCents ? ` The ${usd(s.balanceDueCents)} balance is paid to the seller at handover (financing or PayPal checkout), at the sealed price.` : ""}<div class="small mono" style="margin-top:4px">batch ${esc(s.payout.batchId)} · ${esc(s.payout.status)}</div></div></div>` : ""}</div>`;
 }
 
 // ---------- post a job ----------
@@ -481,7 +519,8 @@ function viewNew() {
         <label class="field">Most you'll pay per job ($) · private<input class="input" name="limitDollars" type="number" min="1" inputmode="decimal" required value="${d?.limitDollars || ""}" /></label>
         <label class="field">Start by<input class="input" name="completeBy" type="date" value="${esc(d?.completeBy)}" /></label>
         <label class="field">Minimum warranty (months)<input class="input" name="minWarrantyMonths" type="number" min="0" value="${d?.minWarrantyMonths ?? 0}" /></label>
-        <label class="field">Homes / jobs<input class="input" name="units" type="number" min="1" value="${d?.units || 1}" /></label>
+        <label class="field">Refundable deposit per unit ($, item pools)<input class="input" name="depositDollars" type="number" min="1" inputmode="decimal" placeholder="e.g. 500 for a car" value="${d?.depositDollars || (cat(d?.category).pool && d?.limitDollars > 1000 ? 500 : "")}" /></label>
+        <label class="field">Homes / units<input class="input" name="units" type="number" min="1" value="${d?.units || 1}" /></label>
         <label class="switch full"><input type="checkbox" name="licensed" ${d?.licensed ? "checked" : ""} />Licensed pro required</label>
         <div class="field full">How do you want to buy?
           <div class="seg"><label><input type="radio" name="mode" value="solo" ${!d || d.units <= 1 ? "checked" : ""} />Just me</label><label><input type="radio" name="mode" value="together" ${d?.units > 1 ? "checked" : ""} />With neighbours</label></div></div>
@@ -668,6 +707,9 @@ function wireHome() {
       gutters: "Gutter cleaning for 5 homes on our street before winter, max $130 each.",
       cleaning: "Deep clean of a 2-bed apartment this Saturday, max $220.",
       handyman: "Mount a TV and fix a sticking door, max $180.",
+      vehicles: "5 of us want the same 2026 compact hybrid SUV from one dealership, max $33,000 each, 36-month warranty, Austin 78704.",
+      electronics: "8 parents buying the same Chromebook for school, max $300 each, delivered to Austin 78704.",
+      appliances: "6 neighbours want heat-pump water heaters installed, max $900 each, Austin 78704.",
     }[b.dataset.cat];
     ui.draft = null;
     location.hash = "#/new";
@@ -746,7 +788,10 @@ function wireNew() {
       const out = await post("/api/requests", {
         mode: f.get("mode"), title: f.get("title"), category: f.get("category"), description: f.get("description") || "", zip: f.get("zip") || "",
         licensed: f.get("licensed") === "on", minWarrantyMonths: Number(f.get("minWarrantyMonths") || 0), completeBy: f.get("completeBy") || "",
-        buyerName: f.get("buyerName") || "You", limitDollars: Number(f.get("limitDollars")), units: Number(f.get("units") || 1),
+        buyerName: f.get("buyerName") || "You", limitDollars: Number(f.get("limitDollars")),
+        // Item pools: the creator buys one unit; the others join with their own holds.
+        units: cat(f.get("category")).pool && f.get("mode") === "together" ? 1 : Number(f.get("units") || 1),
+        ...(Number(f.get("depositDollars")) > 0 ? { depositDollars: Number(f.get("depositDollars")) } : {}),
       });
       ui.draft = null;
       location.hash = `#/job/${out.request.id}`;

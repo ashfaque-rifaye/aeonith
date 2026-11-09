@@ -125,6 +125,12 @@ export interface JobRequest {
   description: string;
   zip: string;
   requirements: Requirements;
+  /**
+   * Big-ticket item pools (cars, appliances): each buyer holds a refundable deposit per unit instead of their full
+   * limit. Their private limit still decides whether they're in the deal; the deposit is captured at delivery and
+   * applied to the price, and the balance is paid to the seller at handover (financing / PayPal checkout).
+   */
+  depositPerUnitCents?: Cents;
   createdAt: string;
   closesAt: string;
   status: RequestStatus;
@@ -142,6 +148,8 @@ export interface Settlement {
   at: string;
   captures: { buyerId: string; amountCents: Cents; captureId: string }[];
   voids: { buyerId: string; reason: string }[];
+  /** Deposit pools only: what buyers still owe the seller at handover (price − deposit) across the deal. */
+  balanceDueCents?: Cents;
   payout?: { batchId: string; amountCents: Cents; feeCents: Cents; receiver: string; status: string };
 }
 
@@ -154,6 +162,8 @@ export interface DemandSignal {
   description: string;
   zip: string;
   requirements: Requirements;
+  /** Item pools: the refundable deposit each funded unit has placed (public deal terms, not a buyer limit). */
+  depositPerUnitCents?: Cents;
   fundedUnits: number;
   fundedRequests: number;
   closesAt: string;

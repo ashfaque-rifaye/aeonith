@@ -45,6 +45,7 @@ export function demandSignal(r: JobRequest): DemandSignal {
     description: r.description,
     zip: r.zip,
     requirements: r.requirements,
+    depositPerUnitCents: r.depositPerUnitCents,
     fundedUnits: held.reduce((s, b) => s + b.units, 0),
     fundedRequests: held.length,
     closesAt: r.closesAt,

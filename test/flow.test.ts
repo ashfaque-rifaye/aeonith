@@ -134,3 +134,36 @@ test("holds older than PayPal's 3-day honor period are reauthorized before captu
   assert.ok(store.audit.all(solo.id).some((e) => e.action === "hold.reauthorized"));
   assert.equal(solo.status, "settled");
 });
+
+test("car pool from one dealership: $500 refundable deposits, sealed dealer bids, deposit applied at delivery", async () => {
+  const { store, svc } = setup();
+  const inDays = (d: number) => new Date(Date.now() + d * 86400_000).toISOString().slice(0, 10);
+  const { request: r } = await svc.createRequest({
+    mode: "together", title: "5 × 2026 compact hybrid SUV, same trim", category: "vehicles", description: "Same model and trim, Austin TX.",
+    zip: "78704", licensed: true, minWarrantyMonths: 36, completeBy: inDays(10), buyerName: "Ava", limitDollars: 33000, units: 1, depositDollars: 500,
+  });
+  svc.join(r.id, { name: "Ben", limitDollars: 32500, units: 1, soloBestDollars: 32100 });
+  svc.join(r.id, { name: "Cara", limitDollars: 32800, units: 1 });
+  svc.join(r.id, { name: "Dan", limitDollars: 32000, units: 1 });
+  svc.join(r.id, { name: "Eli", limitDollars: 31500, units: 1 });
+  await holdAll(svc, r.id, store);
+  assert.ok(r.buyers.every((b) => b.authorizedCents === 50000), "each buyer holds only the $500 deposit, not $33k");
+
+  await svc.runSimulatedProviders(r.id);
+  assert.equal(r.commitments.length, 3, "three dealer agents bid");
+  svc.closeBidding(r.id);
+  await svc.award(r.id);
+  assert.equal(r.award!.providerName, "Capital Auto Group");
+  assert.equal(r.award!.priceCents, 3198000);
+  assert.match(r.award!.table.find((t) => t.providerName === "Lakeline Value Cars")!.note, /warranty 12/);
+  assert.equal(r.buyers.find((b) => b.name === "Eli")!.status, "voided", "Eli's $31.5k limit is below the price: released");
+
+  svc.issueChallenge(r.id);
+  await svc.submitProof(r.id, { imageBase64: PNG, note: "VIN plates + code at handover" });
+  svc.confirmDone(r.id);
+  await svc.settle(r.id, "buyer");
+  assert.equal(r.settlement!.captures.length, 4);
+  assert.ok(r.settlement!.captures.every((c) => c.amountCents === 50000), "only the deposit is captured");
+  assert.equal(r.settlement!.balanceDueCents, 4 * (3198000 - 50000));
+  assert.equal(r.settlement!.payout!.amountCents, 200000 - 6000);
+});

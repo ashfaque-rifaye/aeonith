@@ -91,6 +91,7 @@ app.post("/api/requests", wrap(async (req, res) => {
       buyerName: z.string().max(60).default("You"),
       limitDollars: z.number().positive().max(100000),
       units: z.number().int().min(1).max(20).default(1),
+      depositDollars: z.number().positive().max(100000).optional(),
     })
     .parse(req.body);
   res.status(201).json(await app$.createRequest(body));

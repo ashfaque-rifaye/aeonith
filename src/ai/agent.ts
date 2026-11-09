@@ -11,7 +11,7 @@ import type { DemandSignal, Offer, Promises, Provider } from "../domain/types.js
 
 export const JobDraft = z.object({
   title: z.string().describe("Short job title, e.g. 'Fix leaking water heater'"),
-  category: z.enum(["plumbing", "electrical", "hvac", "gutters", "cleaning", "handyman", "landscaping", "moving", "other"]),
+  category: z.enum(["plumbing", "electrical", "hvac", "gutters", "cleaning", "handyman", "landscaping", "moving", "vehicles", "electronics", "appliances", "other"]),
   description: z.string().describe("One or two sentences a provider needs to quote the job"),
   zip: z.string().describe("US ZIP code if stated, else empty string"),
   limitDollars: z.number().describe("The most the person will pay per job in USD; 0 if not stated. Never invent one."),
@@ -156,7 +156,13 @@ export function offlineJob(text: string): JobDraft {
   const zip = text.match(/\b(\d{5})\b/);
   const warranty = text.match(/(\d{1,2})[\s-]*(?:month|mo)s?\s+warranty/i) ?? text.match(/warranty[^\d]{0,20}(\d{1,2})\s*(?:month|mo)/i);
   const yearWarranty = /(1|one)[\s-]*year\s+warranty|warranty[^.]{0,20}(1|one)\s*year/i.test(text);
-  const category: JobDraft["category"] = /water heater|leak|pipe|drain|toilet|faucet|plumb/.test(t)
+  const category: JobDraft["category"] = /\b(car|cars|suv|truck|sedan|vehicle|hybrid|dealer|dealership|ev)\b/.test(t) && !/charger/.test(t)
+    ? "vehicles"
+    : /laptop|chromebook|tablet|phone|monitor|ipad/.test(t)
+      ? "electronics"
+      : /fridge|refrigerator|washer|dryer|dishwasher|appliance/.test(t)
+        ? "appliances"
+        : /water heater|leak|pipe|drain|toilet|faucet|plumb/.test(t)
     ? "plumbing"
     : /outlet|wiring|breaker|electric|ev charger/.test(t)
       ? "electrical"
@@ -180,7 +186,7 @@ export function offlineJob(text: string): JobDraft {
     d.setDate(d.getDate() + delta);
     completeBy = d.toISOString().slice(0, 10);
   }
-  const homes = text.match(/(\d{1,3})\s+(?:homes|houses|neighbou?rs|units)/i);
+  const homes = text.match(/(\d{1,3})\s+of us\b/i) ?? text.match(/(\d{1,3})\s+(?:homes|houses|neighbou?rs|units|buyers|people|families|parents|coworkers|cars|laptops|chromebooks)/i);
   return {
     title: text.split(/[.,;\n]/)[0].slice(0, 70) || "Home service job",
     category,
@@ -189,7 +195,7 @@ export function offlineJob(text: string): JobDraft {
     limitDollars: price ? Number(price[1].replace(/,/g, "")) : 0,
     units: homes ? Number(homes[1]) : 1,
     completeBy,
-    licensed: ["plumbing", "electrical", "hvac"].includes(category),
+    licensed: ["plumbing", "electrical", "hvac", "vehicles"].includes(category),
     minWarrantyMonths: warranty ? Number(warranty[1]) : yearWarranty ? 12 : 0,
   };
 }

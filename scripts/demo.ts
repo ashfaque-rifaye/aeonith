@@ -3,6 +3,7 @@
  * checks each result, and leaves the app full of realistic Austin, TX jobs in every state:
  *   settled (solo, electrical) · settled (solo, HVAC, with a blocked overcharge attempt) · settled (group, gutters)
  *   released (no bid within the limit) · in progress (cleaning, pro booked) · fresh (Maria's water heater, for a live demo)
+ *   item pools: five buyers, one car model, one dealership ($500 refundable deposits) · eight parents, one Chromebook order
  *
  * Works in both PayPal modes:
  *   - simulated: holds are approved automatically through the local stand-in.
@@ -34,7 +35,7 @@ function check(cond: unknown, msg: string) {
   if (cond) console.log(`   ✓ ${msg}`);
   else { failures++; console.log(`   ✗ ${msg}`); }
 }
-const usd = (c: number) => `$${(c / 100).toFixed(2)}`;
+const usd = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** A real (tiny) PNG with random pixels, so every proof photo has a unique SHA-256. */
@@ -85,6 +86,17 @@ async function solo(mode: string, s: { title: string; category: string; descript
   const { request, buyer } = await api("/api/requests", { mode: "solo", zip: "78704", units: 1, completeBy, ...s });
   await hold(request.id, buyer.id, mode);
   return request.id as string;
+}
+
+/** A Together pool: the first buyer creates it, the rest join, then everyone approves their own PayPal hold. */
+async function pool(mode: string, s: { title: string; category: string; description: string; licensed: boolean; minWarrantyMonths: number; completeInDays: number; depositDollars?: number; buyers: [string, number, number?][] }) {
+  const completeBy = new Date(Date.now() + s.completeInDays * 86400_000).toISOString().slice(0, 10);
+  const [[firstName, firstLimit], ...rest] = s.buyers;
+  const { request } = await api("/api/requests", { mode: "together", zip: "78704", units: 1, completeBy, title: s.title, category: s.category, description: s.description, licensed: s.licensed, minWarrantyMonths: s.minWarrantyMonths, buyerName: firstName, limitDollars: firstLimit, ...(s.depositDollars ? { depositDollars: s.depositDollars } : {}) });
+  for (const [name, limitDollars, soloBestDollars] of rest) await api(`/api/requests/${request.id}/join`, { name, limitDollars, units: 1, ...(soloBestDollars ? { soloBestDollars } : {}) });
+  const r = await api(`/api/requests/${request.id}`);
+  for (const b of r.buyers) await hold(r.id, b.id, mode);
+  return r.id as string;
 }
 
 async function main() {
@@ -141,8 +153,39 @@ async function main() {
   const code = await api(`/api/requests/${cl}/challenge`, {});
   check(cc.r.status === "awarded" && code.code, `booked ${cc.r.award?.providerName} at ${usd(cc.r.award?.priceCents)}; proof code ${code.code}`);
 
-  // 6. Integrity
-  console.log("\n6. Integrity");
+  // 6. Car pool from one dealership → $500 refundable deposits → deposit applied at delivery
+  console.log("\n6. Five buyers, one car model, one dealership (item pool, $500 refundable deposits)");
+  const car = await pool(health.paypal, {
+    title: "5 × 2026 compact hybrid SUV, same trim", category: "vehicles", licensed: true, minWarrantyMonths: 36, completeInDays: 10, depositDollars: 500,
+    description: "Same model, XLE-class trim, any colour. Out-the-door price per car incl. dealer fees, excl. tax/title. Austin TX 78704.",
+    buyers: [["Ava M.", 33000], ["Ben O.", 32500, 32100], ["Cara L.", 32800], ["Dan V.", 32000], ["Eli S.", 31500]],
+  });
+  const carHeld = (await api(`/api/requests/${car}`)).buyers.map((b: Json) => b.authorizedCents);
+  check(carHeld.every((c: number) => c === 50000), `each buyer holds only a $500 deposit (not a $33k car price)`);
+  const vc = await compete(car);
+  const carFiltered = vc.r.award?.table.filter((t: Json) => !t.feasible).map((t: Json) => `${t.providerName}: ${t.note}`) ?? [];
+  check(vc.r.award?.providerName === "Capital Auto Group", `${vc.bids.length} dealer agents sealed bids; ${vc.r.award?.providerName} wins at ${usd(vc.r.award?.priceCents)}/car for ${vc.r.award?.unitsServed} cars`);
+  check(carFiltered.length >= 1, `not chosen: ${carFiltered.join("; ")}`);
+  check(vc.r.buyers.find((b: Json) => b.name === "Eli S.")?.status === "voided", "Eli ($31,500 max) released at award, deposit never charged");
+  const vp = await proveAndPay(car);
+  check(vp.r.settlement.captures.every((c: Json) => c.amountCents === 50000) && vp.r.settlement.balanceDueCents === vc.r.award.unitsServed * (vc.r.award.priceCents - 50000),
+    `delivery proven (VIN + code): deposits captured, ${usd(vp.r.settlement.balanceDueCents)} balance due at handover; payout ${usd(vp.r.settlement.payout.amountCents)}`);
+
+  // 7. Bulk items: one Chromebook order for eight parents
+  console.log("\n7. Eight parents, one Chromebook order (item pool, full-price holds)");
+  const cb = await pool(health.paypal, {
+    title: "8 × school Chromebook (same model), delivered", category: "electronics", licensed: false, minWarrantyMonths: 12, completeInDays: 7,
+    description: "Same 11.6\" education Chromebook for Grade 5, 12-month warranty, delivered to the PTA room. Austin TX 78704.",
+    buyers: [["Nina P.", 300], ["Omar F.", 290], ["Priya N.", 280], ["Quinn J.", 275], ["Rosa D.", 299], ["Sid K.", 270], ["Tess W.", 268], ["Uma B.", 250]],
+  });
+  const ic = await compete(cb);
+  check(ic.r.award?.providerName === "CampusTech Supply" && ic.r.award?.unitsServed === 7, `${ic.r.award?.providerName} wins at ${usd(ic.r.award?.priceCents)} per device for ${ic.r.award?.unitsServed} parents (retail ~$349)`);
+  check(ic.r.buyers.find((b: Json) => b.name === "Uma B.")?.status === "voided", "Uma ($250 max) released, never charged");
+  const ip = await proveAndPay(cb);
+  check(ip.r.status === "settled", `delivery photo proven; ${ip.r.settlement.captures.length} captures, payout ${usd(ip.r.settlement.payout.amountCents)}`);
+
+  // 8. Integrity
+  console.log("\n8. Integrity");
   const audit = await api("/api/audit");
   check(audit.verify.ok, `audit chain intact (${audit.verify.length} signed events)`);
   const signals = await api("/protocol/v1/requests");

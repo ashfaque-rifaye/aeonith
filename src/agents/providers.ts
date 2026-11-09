@@ -124,6 +124,73 @@ export function demoProviders(payoutEmail: string): Provider[] {
       warrantyMonths: 3,
       leadHours: 48,
     },
+    // ----- Item pools: the same loop for goods. "Travel" here is the seller's fixed cost per deal
+    // (prep, paperwork, delivery run), shared across every unit in the pool. -----
+    {
+      id: "capitalauto",
+      name: "Capital Auto Group",
+      payoutEmail,
+      licensed: true,
+      licenseNo: "P-104422", // Texas DMV General Distinguishing Number (dealer licence)
+      categories: ["vehicles"],
+      baseCostCents: 3020000, // dealer cost incl. holdback for the trim
+      travelCostCents: 400000, // per-deal fixed cost: prep, paperwork, F&I desk time
+      marginPct: 2.5,
+      warrantyMonths: 36,
+      leadHours: 72,
+    },
+    {
+      id: "hillcountrymotors",
+      name: "Hill Country Motors",
+      payoutEmail,
+      licensed: true,
+      licenseNo: "P-098317",
+      categories: ["vehicles"],
+      baseCostCents: 2980000,
+      travelCostCents: 600000,
+      marginPct: 3,
+      warrantyMonths: 36,
+      leadHours: 96,
+    },
+    {
+      id: "lakelinecars",
+      name: "Lakeline Value Cars",
+      payoutEmail,
+      licensed: true,
+      licenseNo: "P-112907",
+      categories: ["vehicles"],
+      baseCostCents: 2890000, // certified pre-owned: cheaper, but only a 12-month warranty
+      travelCostCents: 300000,
+      marginPct: 3,
+      warrantyMonths: 12,
+      leadHours: 48,
+    },
+    {
+      id: "campustech",
+      name: "CampusTech Supply",
+      payoutEmail,
+      licensed: false,
+      licenseNo: "",
+      categories: ["electronics", "appliances"],
+      baseCostCents: 23000,
+      travelCostCents: 12000,
+      marginPct: 8,
+      warrantyMonths: 12,
+      leadHours: 48,
+    },
+    {
+      id: "riverbend",
+      name: "Riverbend Electronics",
+      payoutEmail,
+      licensed: false,
+      licenseNo: "",
+      categories: ["electronics"],
+      baseCostCents: 24500,
+      travelCostCents: 8000,
+      marginPct: 6,
+      warrantyMonths: 24,
+      leadHours: 30,
+    },
   ];
 }
 
