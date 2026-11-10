@@ -18,6 +18,16 @@ const Env = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   ANTHROPIC_API_KEY: z.string().optional().default(""),
   AI_MODEL: z.string().default("claude-opus-5-5"),
+  /** NVIDIA API catalog (build.nvidia.com). Used for AI when ANTHROPIC_API_KEY is empty. */
+  NVIDIA_API_KEY: z.string().optional().default(""),
+  NVIDIA_TEXT_MODEL: z.string().default("nvidia/nemotron-3.5-super-vl-120b-a12b"),
+  NVIDIA_VISION_MODEL: z.string().default("nvidia/nemotron-3.5-super-vl-120b-a12b"),
+  /** Starting credit balance shown on build.nvidia.com; the app counts down from it on every request. */
+  NVIDIA_CREDITS: z.coerce.number().min(0).default(1000),
+  NVIDIA_CREDITS_PER_REQUEST: z.coerce.number().min(0).default(1),
+  AI_USAGE_FILE: z.string().default("data/ai-usage.json"),
+  /** AG Grid Enterprise licence (trial). Sent to the browser, which is where AG Grid validates it. */
+  AG_GRID_LICENSE_KEY: z.string().optional().default(""),
   CHANNEL3_API_KEY: z.string().optional().default(""),
   BRYNTUM_LICENSE_KEY: z.string().optional().default(""),
   MAX_AUTH_AMOUNT: z.coerce.number().positive().default(1000),

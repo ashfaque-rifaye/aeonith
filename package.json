@@ -17,12 +17,14 @@
     "mcp": "tsx src/mcp.ts",
     "sandbox:check": "tsx scripts/sandbox-check.ts",
     "webhook:register": "tsx scripts/register-webhook.ts",
-    "demo": "tsx scripts/demo.ts"
+    "demo": "tsx scripts/demo.ts",
+    "nvidia:check": "tsx scripts/nvidia-check.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",
     "@bryntum/scheduler": "npm:@bryntum/scheduler-trial@^7.3.8",
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "ag-grid-enterprise": "36.2.0",
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
     "gsap": "^3.12.7",

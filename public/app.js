@@ -111,6 +111,7 @@ async function act(btn, fn, { rerender = true } = {}) {
 }
 async function load() {
   [requests, audit] = await Promise.all([api("/api/requests"), api("/api/audit").catch(() => audit)]);
+  api("/api/health").then((h) => { health = h; const pills = envPills(); ["#env", "#env-top"].forEach((sel) => { const el = $(sel); if (el) el.innerHTML = pills; }); }).catch(() => {});
 }
 
 // ---------- navigation ----------
@@ -130,9 +131,10 @@ function renderNav(active) {
 function envPills() {
   if (!health) return "";
   const pp = health.paypal === "sandbox";
-  const ai = health.ai.startsWith("claude");
+  const prov = health.aiProvider || (health.ai.startsWith("claude") ? "claude" : "offline");
+  const aiTxt = prov === "nvidia" ? `NVIDIA Nemotron${health.aiCreditsLeft != null ? ` · ~${health.aiCreditsLeft} cr` : ""}` : prov === "claude" ? "Claude online" : "AI offline rules";
   return `<span class="chip ${pp ? "ok" : "warn"}">${ic("lock")}${pp ? "PayPal sandbox" : "PayPal simulated"}</span>
-    <span class="chip ${ai ? "violet" : "warn"}" title="${esc(health.ai)}">${ic("spark")}${ai ? "Claude online" : "AI offline rules"}</span>`;
+    <a class="chip ${prov === "offline" ? "warn" : "violet"}" href="#/trust" title="${esc(health.ai)}">${ic("spark")}${esc(aiTxt)}</a>`;
 }
 
 // ---------- derived ----------
@@ -458,6 +460,8 @@ function winnerCard(r) {
     ${w ? `<div class="note">${ic("info")}<div><b>Binding promises</b> (from the sealed offer): ${w.offer.promises.licensed ? `licensed ${esc(w.offer.promises.licenseNo)}` : "not licensed"}, ${w.offer.promises.warrantyMonths}-month warranty, starts ${esc(when(w.offer.promises.startAt))}.<div class="small muted" style="margin-top:4px">Pitch (display only, never parsed): “${esc(w.pitch)}”</div></div></div>` : ""}
     ${rev ? `<div class="note ai" style="margin-top:10px">${ic("spark")}<div><b>AI promise check:</b> ${esc(rev.summary)}${rev.flags.length ? `<ul>${rev.flags.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>` : ""}</div></div>` : ""}
     ${outs ? `<div class="note warn" style="margin-top:10px">${ic("hand")}<div><b>Released, never charged</b><ul>${outs}</ul></div></div>` : ""}
+    <div class="small muted" style="margin:14px 0 8px">Every sealed offer, side by side (AG Grid):</div>
+    <div class="grid-host" id="bids-grid-${esc(r.id)}"></div>
   </div>`;
 }
 
@@ -581,12 +585,15 @@ async function mountScheduler() {
 }
 
 // ---------- trust ----------
-function viewTrust() {
+function viewTrust(usage) {
   const { verify, entries } = audit;
   return `<div style="margin-bottom:16px"><div class="eyebrow">Tamper-evident · SHA-256 chain</div><h2 style="margin-top:6px">Trust <span class="grad">log</span></h2>
     <p class="muted" style="margin:8px 0 0;max-width:640px">Every bid, AI check, policy decision and PayPal call. Each entry carries the hash of the one before it, so editing history breaks the chain.</p></div>
   <div class="note ${verify.ok ? "ok" : "bad"}">${ic(verify.ok ? "check" : "x")}<div><b>${verify.ok ? "Chain intact" : `Chain broken at #${verify.brokenAt}`}</b> · ${verify.length} entries verified</div></div>
-  <div class="card section"><div class="timeline">${entries.slice().reverse().slice(0, 150).map((e) => {
+  ${aiUsageCard(usage)}
+  <div class="card section"><div class="card-head"><div><h3>${ic("terminal", "inline")} Audit log</h3><div class="small muted" style="margin-top:4px">${small() ? "Tap a header to sort or filter. More columns on desktop." : "Filter, sort or drag a column to the top bar to group (AG Grid Enterprise)."}</div></div><span class="chip">${entries.length} events</span></div>
+    <div class="grid-host" id="audit-grid" style="height:560px"></div>
+  <div class="timeline grid-fallback">${entries.slice().reverse().slice(0, 150).map((e) => {
     const kind = e.actor.split(":")[0];
     const r = requests.find((x) => x.id === e.requestId);
     return `<div class="ev ${kind}"><div class="meta"><span class="chip">${esc(kind)}</span><span>#${e.seq}</span><span>${esc(when(e.at))}</span>${r ? `<a href="#/job/${r.id}">${esc(r.title)}</a>` : ""}</div>
@@ -594,6 +601,132 @@ function viewTrust() {
       <div class="small muted">${esc(Object.entries(e.data || {}).filter(([k]) => k !== "signal").map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join(" · ")).slice(0, 260)}</div>
       <div class="mono muted" style="margin-top:4px">${esc(e.hash.slice(0, 16))}… ← ${esc(e.prevHash.slice(0, 16))}…</div></div>`;
   }).join("")}</div></div>`;
+}
+
+function aiUsageCard(u) {
+  if (!u) return "";
+  const purposes = Object.entries(u.byPurpose || {}).sort((a, b) => b[1].credits - a[1].credits);
+  const live = u.provider === "nvidia";
+  return `<div class="card section" id="ai-usage">
+    <div class="card-head"><div><div class="eyebrow">${ic("spark", "inline")} AI usage</div><h3 style="margin-top:6px">${live ? "NVIDIA credits" : "AI calls"}</h3>
+      <div class="small muted" style="margin-top:4px">${esc(u.label)}. Every NVIDIA request is metered${u.estimated ? `, ${u.creditsPerRequest} credit each (estimate: reconcile on build.nvidia.com)` : ""}.</div></div>
+      <span class="chip ${live ? "violet" : "warn"}">${live ? "live" : "not in use"}</span></div>
+    <div class="kpis" style="margin:0 0 12px">
+      <div class="card kpi"><small>Credits left</small><span class="v num">~${u.remainingCredits}</span><div class="sub">of ${u.startingCredits}</div></div>
+      <div class="card kpi"><small>Credits used</small><span class="v num">${u.creditsUsed}</span><div class="sub">${u.requests} requests · ${u.failed} failed</div></div>
+      <div class="card kpi"><small>Tokens</small><span class="v num">${(u.promptTokens + u.completionTokens).toLocaleString("en-US")}</span><div class="sub">${u.promptTokens.toLocaleString("en-US")} in · ${u.completionTokens.toLocaleString("en-US")} out</div></div>
+      <div class="card kpi"><small>Top use</small><span class="v" style="font-size:20px">${esc(purposes[0]?.[0]?.replace(/_/g, " ") || "n/a")}</span><div class="sub">${purposes[0] ? `${purposes[0][1].credits} credits` : "no calls yet"}</div></div>
+    </div>
+    <div class="chips" style="margin-bottom:12px">${purposes.map(([k, v]) => `<span class="chip">${esc(k.replace(/_/g, " "))} · ${v.credits} cr</span>`).join("")}</div>
+    <div class="grid-host" id="ai-grid" style="height:320px"></div>
+  </div>`;
+}
+
+// ---------- AG Grid Enterprise (loaded on demand) ----------
+let agReady = null;
+function loadAgGrid() {
+  agReady ??= (async () => {
+    const cfg = await api("/api/public-config").catch(() => ({}));
+    await new Promise((res, rej) => {
+      const sc = document.createElement("script");
+      sc.src = "/vendor/ag-grid/ag-grid-enterprise.min.js";
+      sc.onload = res;
+      sc.onerror = () => rej(new Error("AG Grid failed to load"));
+      document.head.append(sc);
+    });
+    const ag = window.agGrid;
+    if (cfg.agGridLicenseKey) ag.LicenseManager.setLicenseKey(cfg.agGridLicenseKey);
+    const theme = ag.themeQuartz.withPart(ag.colorSchemeDark).withParams({
+      backgroundColor: "#1a0705", foregroundColor: "#fff4ee", accentColor: "#ff7a3d", borderColor: "rgba(255,220,200,.12)",
+      headerBackgroundColor: "#260a07", oddRowBackgroundColor: "rgba(255,255,255,.02)", chromeBackgroundColor: "#210806",
+      fontFamily: "Geist, Inter, system-ui, sans-serif", headerFontFamily: "Geist Mono, ui-monospace, monospace", headerFontSize: 11,
+      fontSize: 13, spacing: 6, wrapperBorderRadius: 16, borderRadius: 8, rowHoverColor: "rgba(255,122,61,.10)", selectedRowBackgroundColor: "rgba(255,122,61,.18)",
+    });
+    return { ag, theme };
+  })();
+  return agReady;
+}
+async function mountGrid(id, options) {
+  const host = document.getElementById(id);
+  if (!host) return null;
+  try {
+    const { ag, theme } = await loadAgGrid();
+    if (!document.body.contains(host)) return null;
+    host.closest(".card")?.querySelector(".grid-fallback")?.remove();
+    return ag.createGrid(host, { theme, animateRows: !reduceMotion, defaultColDef: { sortable: true, filter: true, resizable: true, minWidth: 90 }, ...options });
+  } catch (e) {
+    host.remove(); // keep the plain timeline fallback
+    return null;
+  }
+}
+const small = () => matchMedia("(max-width: 720px)").matches;
+function mountTrustGrids(usage) {
+  const rows = audit.entries.slice().reverse().map((e) => {
+    const r = requests.find((x) => x.id === e.requestId);
+    const d = e.data || {};
+    return {
+      seq: e.seq, at: e.at, kind: e.actor.split(":")[0], action: LABEL[e.action] || e.action, job: r?.title || "",
+      amount: d.amount ? Number(d.amount) : d.priceCents ? d.priceCents / 100 : null,
+      details: Object.entries(d).filter(([k]) => k !== "signal").map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join(" · ").slice(0, 300),
+      hash: e.hash.slice(0, 16), jobId: e.requestId,
+    };
+  });
+  mountGrid("audit-grid", {
+    rowData: rows,
+    rowGroupPanelShow: small() ? "never" : "always",
+    sideBar: small() ? false : { toolPanels: ["columns", "filters"], hiddenByDefault: true },
+    enableCellTextSelection: true,
+    columnDefs: [
+      { field: "seq", headerName: "#", width: 70, minWidth: 60, filter: "agNumberColumnFilter", pinned: small() ? null : "left" },
+      { field: "at", headerName: "Time (CT)", width: 170, hide: small(), valueFormatter: (p) => (p.value ? when(p.value) : ""), filter: "agDateColumnFilter", filterParams: { comparator: (d, v) => new Date(v).setHours(0, 0, 0, 0) - d.getTime() } },
+      { field: "kind", headerName: "Actor", width: 110, hide: small(), enableRowGroup: true, filter: "agSetColumnFilter",
+        cellRenderer: (p) => (p.value ? `<span class="chip">${esc(p.value)}</span>` : "") },
+      { field: "action", headerName: "Event", flex: 1, minWidth: 170, enableRowGroup: true, filter: "agSetColumnFilter" },
+      { field: "job", headerName: "Job", flex: 1, minWidth: 180, enableRowGroup: true, filter: "agSetColumnFilter",
+        cellRenderer: (p) => (p.data?.jobId && p.value ? `<a href="#/job/${esc(p.data.jobId)}">${esc(p.value)}</a>` : esc(p.value || "")) },
+      { field: "amount", headerName: "Amount", width: 120, type: "rightAligned", filter: "agNumberColumnFilter", aggFunc: "sum", valueFormatter: (p) => (p.value == null ? "" : usd(Math.round(p.value * 100))) },
+      { field: "details", headerName: "Details", flex: 2, minWidth: 260, hide: small(), filter: "agTextColumnFilter", tooltipField: "details" },
+      { field: "hash", headerName: "Hash", width: 170, cellClass: "mono", hide: small() },
+    ],
+    autoGroupColumnDef: { minWidth: 220 },
+    pagination: true, paginationPageSize: 50, paginationPageSizeSelector: [25, 50, 100, 200],
+  });
+  if (usage) mountGrid("ai-grid", {
+    rowData: usage.recent,
+    columnDefs: [
+      { field: "at", headerName: "Time (CT)", width: 170, hide: small(), valueFormatter: (p) => (p.value ? when(p.value) : ""), sort: "desc" },
+      { field: "purpose", headerName: "Purpose", width: 150, filter: "agSetColumnFilter", valueFormatter: (p) => String(p.value || "").replace(/_/g, " ") },
+      { field: "model", headerName: "Model", flex: 1, minWidth: 220, filter: "agSetColumnFilter", hide: small() },
+      { field: "ok", headerName: "Result", width: 110, filter: "agSetColumnFilter", cellRenderer: (p) => `<span class="chip ${p.value ? "ok" : "bad"}">${p.value ? "ok" : "failed"}</span>`, tooltipField: "error" },
+      { headerName: "Tokens", width: 110, type: "rightAligned", valueGetter: (p) => p.data.promptTokens + p.data.completionTokens, filter: "agNumberColumnFilter" },
+      { field: "ms", headerName: "Latency", width: 110, hide: small(), type: "rightAligned", valueFormatter: (p) => `${(p.value / 1000).toFixed(1)} s` },
+      { field: "credits", headerName: "Credits", width: 100, type: "rightAligned" },
+    ],
+  });
+}
+function mountBidGrid(r) {
+  if (!r.award) return;
+  mountGrid(`bids-grid-${r.id}`, {
+    domLayout: "autoHeight",
+    rowData: r.award.table.map((t) => {
+      const o = r.reveals.find((v) => v.offer.providerId === t.providerId)?.offer;
+      return { ...t, price: t.priceCents / 100, warranty: o?.promises.warrantyMonths ?? null, licence: o?.promises.licensed ? o.promises.licenseNo : "none", start: o?.promises.startAt, surplus: t.surplusCents / 100 };
+    }),
+    columnDefs: [
+      { field: "providerName", headerName: unitOf(r) === "home" ? "Pro" : "Seller", minWidth: 170, flex: 1, pinned: small() ? null : "left",
+        cellRenderer: (p) => `${p.data.note === "Winner" ? "🏆 " : ""}${esc(p.value)}` },
+      { field: "price", headerName: `Price / ${unitOf(r)}`, width: 140, type: "rightAligned", sort: "asc", valueFormatter: (p) => usd(Math.round(p.value * 100)) },
+      { field: "minUnits", headerName: "Min units", width: 110, type: "rightAligned" },
+      { field: "eligibleUnits", headerName: "Can afford", width: 120, type: "rightAligned" },
+      { field: "warranty", headerName: "Warranty", width: 110, type: "rightAligned", valueFormatter: (p) => (p.value == null ? "" : `${p.value} mo`) },
+      { field: "licence", headerName: "Licence", width: 130 },
+      { field: "start", headerName: "Starts", width: 160, valueFormatter: (p) => (p.value ? when(p.value, { minute: undefined }) : "") },
+      { field: "surplus", headerName: "Buyer saving", width: 140, type: "rightAligned", valueFormatter: (p) => usd(Math.round(p.value * 100)) },
+      { field: "note", headerName: "Outcome", minWidth: 220, flex: 1,
+        cellRenderer: (p) => `<span class="chip ${p.value === "Winner" ? "ok" : p.data.feasible ? "" : "warn"}">${esc(p.value)}</span>` },
+    ],
+    getRowStyle: (p) => (p.data.note === "Winner" ? { background: "rgba(255,122,61,.14)" } : undefined),
+  });
 }
 
 // ---------- motion helpers ----------
@@ -648,6 +781,7 @@ async function render({ animate = true } = {}) {
     view.innerHTML = viewJob(r);
     if (r) {
       wireJob(r);
+      mountBidGrid(r);
       const next = nextAction(r);
       if (next) {
         const bar = document.createElement("div");
@@ -661,7 +795,7 @@ async function render({ animate = true } = {}) {
     ui.justRevealed = null;
   } else if (name === "new") { view.innerHTML = viewNew(); wireNew(); }
   else if (name === "pros") { view.innerHTML = `<div class="skeleton"></div>`; const s = await api("/protocol/v1/requests"); view.innerHTML = viewPros(s); mountScheduler(); }
-  else if (name === "trust") view.innerHTML = viewTrust();
+  else if (name === "trust") { const usage = await api("/api/ai/usage").catch(() => null); view.innerHTML = viewTrust(usage); mountTrustGrids(usage); }
   else { location.hash = "#/home"; return; }
   animateNumbers(view);
   scrambleHashes(view);

@@ -20,11 +20,11 @@ Home repair was **Tennessee's #1 consumer complaint in 2025, at a record high**.
 AI shopping agents could help, but a 2026 study showed that when an agent chats with a seller, the seller can work out the most you'd pay. We wanted the opposite: **agents that compete for you without ever learning your limit, and money that only moves on proof.**
 
 ### What it does
-1. **Ask.** "Water heater leaking, fix by Friday, max $400, licensed only." Claude turns it into a structured, funded request.
+1. **Ask.** "Water heater leaking, fix by Friday, max $400, licensed only." An AI agent (NVIDIA Nemotron) turns it into a structured, funded request.
 2. **Hold.** You approve one **PayPal hold** (Orders v2 `AUTHORIZE`) at your private limit. It's reserved, not paid.
 3. **Compete.** Pros' AI agents see only the job, area and number of funded homes, never your limit. Each submits a **sealed bid**: a SHA-256 commitment that nobody, including us, can read or change before the close.
-4. **Award.** Bids are revealed and checked against their commitments. Deterministic clearing picks the best offer that meets your requirements, and Claude checks the winner's promises.
-5. **Prove.** The pro photographs the finished job with a **one-time code** in frame. Code checks reuse and freshness; Claude vision checks the code and the work.
+4. **Award.** Bids are revealed and checked against their commitments. Deterministic clearing picks the best offer that meets your requirements, and the AI checks the winner's promises.
+5. **Prove.** The pro photographs the finished job with a **one-time code** in frame. Code checks reuse and freshness; Nemotron VL vision checks the code and the work.
 6. **Pay.** A **policy gate** allows a partial capture only of the final price, only ≤ your hold, only after proof. The rest is released to you, and **PayPal Payouts** pays the pro.
 
 **Together mode:** neighbours who need the same job join with their own holds. A provider's single trip makes the per-home price lower, everyone pays the same price, anyone below it is released, and a **best-of guarantee** means you never pay more than a solo quote you already have.
@@ -49,14 +49,14 @@ The eight demo scenarios move about $4,976 through 18 captures and 5 payouts, wo
   - **Payouts** to the provider
   - Webhooks with `verify-webhook-signature`
   - `PayPal-Request-Id` idempotency
-- **AI:** Claude (`claude-opus-5-5`) for structured-output intake, provider-agent pitches, promise checks and **vision proof checks**. The AI advises; code decides. Every AI step has a deterministic fallback.
+- **AI:** **NVIDIA Nemotron** (`nemotron-3.5-super-vl`, text + vision, via build.nvidia.com) for schema-validated intake, provider-agent pitches, promise checks and **vision proof checks**. **Every NVIDIA request is metered** (credits, tokens, latency, purpose) and shown live on the Trust page. Claude is supported as an alternative provider. The AI advises; code decides. Every AI step has a deterministic fallback.
 - **Agent-to-agent:** an open **Offer Protocol** exposed over HTTP and as an **MCP server**, so any MCP-capable provider agent can discover funded jobs and bid.
 - **Trust:**
   - commit–reveal sealed bids
   - a payment policy gate in front of every PayPal call
   - a **hash-chained, tamper-evident audit log**
   - a Sybil check for duplicate provider identities
-- **Experience:** a real-time **three.js** 3D claw that *holds your card* and follows the job (grips when held, sparks during bidding, scans during proof, drops the card to the pro on payment), plus **GSAP** motion and **Bryntum Scheduler** for booked jobs.
+- **Experience:** a real-time **three.js** 3D claw that *holds your card* and follows the job (grips when held, sparks during bidding, scans during proof, drops the card to the pro on payment), plus **GSAP** motion, **Bryntum Scheduler** for booked jobs, and **AG Grid Enterprise** for the audit log (filters, row grouping), AI-usage grid and the sealed-offer comparison on every job.
 - **Stack:** Node 22, TypeScript, Express 5, Zod 4. 16 automated tests cover clearing, commit–reveal, the policy gate, the audit chain, proof, reauthorization, and the full solo, group and car-pool (deposit) flows.
 
 ### Challenges
@@ -85,7 +85,7 @@ Authorization holds are an underrated trust primitive: hold, partial capture, vo
 - Not legal advice.
 
 ## Built with
-paypal, paypal-orders-v2, paypal-payments, paypal-payouts, paypal-webhooks, claude, anthropic, model-context-protocol, typescript, node.js, express, zod, three.js, gsap, bryntum, render
+paypal, paypal-orders-v2, paypal-payments, paypal-payouts, paypal-webhooks, nvidia, nemotron, nvidia-nim, claude, model-context-protocol, ag-grid, typescript, node.js, express, zod, three.js, gsap, bryntum, render
 
 ## Links
 - Repo: [[GitHub URL]]
@@ -106,5 +106,7 @@ paypal, paypal-orders-v2, paypal-payments, paypal-payouts, paypal-webhooks, clau
 5. Try **"Test: let an agent overcharge"**: the policy gate blocks it.
 
 ## Sponsor tools to tick
+- NVIDIA (Nemotron via the NVIDIA API catalog: intake, pitches, promise checks, vision proof)
+- AG Grid (Enterprise: audit log, AI usage, sealed-offer comparison)
 - Bryntum (Scheduler: booked jobs)
 - Render (hosting), if deployed there

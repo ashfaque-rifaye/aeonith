@@ -184,3 +184,10 @@ body.is-home .main { padding-top: 0; }
 
 /* full-bleed hero uses 100vw, which includes the scrollbar on desktop: clip the few pixels instead of scrolling sideways */
 html, body { overflow-x: clip; }
+
+/* ---------- AG Grid hosts ---------- */
+.grid-host { width: 100%; min-width: 0; max-width: 100%; }
+.grid-host .chip { padding: 2px 8px; font-size: 11px; }
+.grid-host a { color: var(--ember-6); }
+.grid-host + .grid-fallback, .grid-host ~ .grid-fallback { display: none; }
+@media (max-width: 720px) { #audit-grid { height: 460px !important; } #ai-grid { height: 280px !important; } }

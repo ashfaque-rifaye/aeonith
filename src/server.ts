@@ -4,6 +4,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { z } from "zod";
 import { demoProviders } from "./agents/providers.js";
 import { Agent } from "./ai/agent.js";
+import { NvidiaClient, UsageMeter } from "./ai/nvidia.js";
 import { loadConfig } from "./config.js";
 import { fmt } from "./core/clearing.js";
 import { PayPalClient } from "./paypal/client.js";
@@ -15,7 +16,13 @@ import { seedDemo, Store } from "./store.js";
 
 const cfg = loadConfig();
 const paypal: PaymentRail = cfg.paypalMode === "sandbox" ? new PayPalClient(cfg) : new SimulatedPayPal(cfg.APP_BASE_URL);
-const agent = new Agent(cfg.ANTHROPIC_API_KEY, cfg.AI_MODEL);
+// NVIDIA usage is metered on every request (credits counted down from NVIDIA_CREDITS, persisted to AI_USAGE_FILE).
+const meter = new UsageMeter(cfg.AI_USAGE_FILE, cfg.NVIDIA_CREDITS, cfg.NVIDIA_CREDITS_PER_REQUEST);
+const agent = new Agent(
+  cfg.ANTHROPIC_API_KEY,
+  cfg.AI_MODEL,
+  cfg.NVIDIA_API_KEY ? { client: new NvidiaClient(cfg.NVIDIA_API_KEY, meter), textModel: cfg.NVIDIA_TEXT_MODEL, visionModel: cfg.NVIDIA_VISION_MODEL } : null,
+);
 const store = new Store(cfg.DATA_FILE);
 seedDemo(store);
 const app$ = new Aeonith({
@@ -44,6 +51,7 @@ app.use("/vendor/bryntum", express.static(fileURLToPath(new URL("../node_modules
 app.use("/vendor/three", express.static(fileURLToPath(new URL("../node_modules/three", import.meta.url))));
 app.use("/vendor/gsap", express.static(fileURLToPath(new URL("../node_modules/gsap", import.meta.url))));
 app.use("/vendor/lenis", express.static(fileURLToPath(new URL("../node_modules/lenis/dist", import.meta.url))));
+app.use("/vendor/ag-grid", express.static(fileURLToPath(new URL("../node_modules/ag-grid-enterprise/dist", import.meta.url)), { maxAge: "7d" })); // loaded on demand
 
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown> | unknown) => (req: Request, res: Response, next: NextFunction) =>
   Promise.resolve(fn(req, res)).catch(next);
@@ -59,14 +67,18 @@ app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
     paypal: paypal.mode,
-    ai: agent.online ? `claude (${cfg.AI_MODEL})` : "offline rules (no ANTHROPIC_API_KEY)",
+    ai: agent.label,
+    aiProvider: agent.provider,
+    aiCreditsLeft: agent.provider === "nvidia" ? meter.remaining : null,
     currency: cfg.CURRENCY,
     audit: store.audit.verify(),
   });
 });
 app.get("/api/public-config", (_req, res) => {
-  res.json({ paypalMode: paypal.mode, currency: cfg.CURRENCY, feePct: cfg.PLATFORM_FEE_PCT });
+  res.json({ paypalMode: paypal.mode, currency: cfg.CURRENCY, feePct: cfg.PLATFORM_FEE_PCT, agGridLicenseKey: cfg.AG_GRID_LICENSE_KEY });
 });
+// AI usage and NVIDIA credit meter (no prompts or outputs are stored, only counts, models and timings).
+app.get("/api/ai/usage", (_req, res) => res.json({ provider: agent.provider, label: agent.label, ...meter.summary() }));
 
 // ---------- buyer side ----------
 app.post("/api/intake", wrap(async (req, res) => {
@@ -143,7 +155,8 @@ app.post("/api/requests/:id/award", wrap(async (req, res) => res.json(await app$
 // ---------- proof + settlement ----------
 app.post("/api/requests/:id/challenge", wrap(async (req, res) => res.json(app$.issueChallenge(req.params.id))));
 app.post("/api/requests/:id/proof", wrap(async (req, res) => {
-  const body = z.object({ imageBase64: z.string().min(100).max(12_000_000), note: z.string().max(500).default("") }).parse(req.body);
+  const body = z.object({ imageBase64: z.string().min(100).max(12_000_000), note: z.string().max(500).default(""), skipVision: z.boolean().default(false) }).parse(req.body);
+  if (body.skipVision) requireAdmin(req);
   res.json(await app$.submitProof(req.params.id, body));
 }));
 app.post("/api/requests/:id/confirm", wrap(async (req, res) => {
@@ -215,6 +228,6 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 app.listen(cfg.PORT, () => {
   console.log(`Aeonith on ${cfg.APP_BASE_URL}`);
   console.log(`  PayPal: ${paypal.mode}${paypal.mode === "simulated" ? " (set PAYPAL_CLIENT_ID + PAYPAL_CLIENT_SECRET for the real sandbox)" : ""}`);
-  console.log(`  AI: ${agent.online ? cfg.AI_MODEL : "offline rules"}`);
+  console.log(`  AI: ${agent.label}${agent.provider === "nvidia" ? ` · ~${meter.remaining} of ${cfg.NVIDIA_CREDITS} NVIDIA credits left` : ""}`);
   console.log(`  Holds capped at $${fmt(Math.round(cfg.MAX_AUTH_AMOUNT * 100))} per person`);
 });

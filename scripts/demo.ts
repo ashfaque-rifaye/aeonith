@@ -76,7 +76,8 @@ async function compete(rid: string) {
 
 async function proveAndPay(rid: string) {
   const ch = await api(`/api/requests/${rid}/challenge`, {});
-  const proof = await api(`/api/requests/${rid}/proof`, { imageBase64: photo(), note: `Work complete. Code ${ch.code} in frame.` });
+    // Synthetic photos: skip AI vision (admin-only flag) so the run doesn't spend AI credits on noise images.
+  const proof = await api(`/api/requests/${rid}/proof`, { imageBase64: photo(), note: `Work complete. Code ${ch.code} in frame.`, skipVision: true }, { "x-admin-token": ADMIN });
   if (proof.verdict !== "pass") await api(`/api/requests/${rid}/confirm`, {});
   return { ch, proof, r: await api(`/api/requests/${rid}/settle`, { as: "buyer" }) };
 }

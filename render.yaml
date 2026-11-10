@@ -34,5 +34,15 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: NVIDIA_TEXT_MODEL
+        value: nvidia/nemotron-3.5-super-vl-120b-a12b
+      - key: NVIDIA_VISION_MODEL
+        value: nvidia/nemotron-3.5-super-vl-120b-a12b
+      - key: NVIDIA_CREDITS
+        sync: false # your current balance on build.nvidia.com
+      - key: AG_GRID_LICENSE_KEY
+        sync: false
       - key: CHANNEL3_API_KEY
         sync: false

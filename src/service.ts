@@ -289,14 +289,18 @@ export class Aeonith {
     return r.proof;
   }
 
-  async submitProof(rid: unknown, input: { imageBase64: string; note: string }) {
+  async submitProof(rid: unknown, input: { imageBase64: string; note: string; skipVision?: boolean }) {
     const r = this.req(rid);
     if (!r.proof || !["awarded", "proving"].includes(r.status)) throw new HttpError(409, "No open proof challenge");
     const buf = Buffer.from(input.imageBase64, "base64");
     if (buf.length < 100) throw new HttpError(400, "Upload a photo of the finished job");
     const facts = inspectImage(buf);
     const checks = codeChecks(facts, r.proof.issuedAt, this.store.photoHashes);
-    const ai = await this.d.agent.checkCompletion({
+    // Admin-only (checked in the route): synthetic demo photos skip AI vision so they don't spend AI credits;
+    // the verdict then needs the buyer's confirmation, exactly as when AI is offline.
+    const ai = input.skipVision
+      ? { codeVisible: null, matchesJob: null, summary: "Synthetic demo photo: AI vision skipped by admin, buyer confirms.", codeSeen: "" }
+      : await this.d.agent.checkCompletion({
       jobTitle: r.title,
       jobDescription: r.description,
       code: r.proof.code,
@@ -309,7 +313,7 @@ export class Aeonith {
     this.store.photoHashes.add(facts.sha256);
     r.proof = { ...r.proof, submittedAt: new Date().toISOString(), photoSha256: facts.sha256, note: input.note.slice(0, 500), checks, aiSummary: ai.summary, verdict: verdict(checks) };
     r.status = "proving";
-    this.log("provider:" + r.award!.providerId, "proof.submitted", { sha256: facts.sha256, verdict: r.proof.verdict }, r.id);
+    this.log("provider:" + r.award!.providerId, "proof.submitted", { sha256: facts.sha256, verdict: r.proof.verdict, ...(input.skipVision ? { aiVision: "skipped by admin" } : {}) }, r.id);
     this.store.save();
     return r.proof;
   }

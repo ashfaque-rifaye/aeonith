@@ -12,11 +12,11 @@ Built for the [PayPal AI Hackathon 2026](https://paypalaihackathon.devpost.com/)
 ## How it works
 | Step | What happens | Who decides |
 |---|---|---|
-| 1. Ask | “Water heater leaking, fix by Friday, max $400, licensed only.” Claude turns it into a structured request. | AI (structured outputs) |
+| 1. Ask | “Water heater leaking, fix by Friday, max $400, licensed only.” The AI agent (NVIDIA Nemotron, or Claude) turns it into a structured request. | AI (schema-validated output) |
 | 2. **Hold** | You approve **one PayPal hold** at your limit (Orders v2 `intent: AUTHORIZE`). | You, in PayPal |
 | 3. **Compete** | Provider agents see only the job, area, number of funded homes and deadline. **Never your limit.** Each submits `SHA-256(offer + salt)`. | Provider agents |
 | 4. Reveal & award | After close, providers reveal and each offer is checked against its hash. Deterministic clearing picks the best offer that meets your requirements. In **Together** mode everyone pays the same price, and anyone below it is released. | Code |
-| 5. **Prove** | The provider photographs the finished job with a **one-time code** in frame. Code checks reuse and freshness; Claude vision checks the code and the work. | Code + AI advise, you confirm |
+| 5. **Prove** | The provider photographs the finished job with a **one-time code** in frame. Code checks reuse and freshness; AI vision (Nemotron VL) checks the code and the work. | Code + AI advise, you confirm |
 | 6. **Pay** | The **policy gate** allows capture only of the final price, only ≤ your hold, only after proof or your confirmation. Then: partial capture (the rest is released to you) → **Payouts** to the provider. | Code + PayPal |
 
 Every step is written to a **hash-chained audit log**. Editing any past entry breaks the chain.
@@ -36,14 +36,15 @@ Every step is written to a **hash-chained audit log**. Editing any past entry br
   - **Payouts v1**
   - Webhooks with `verify-webhook-signature`
   - `PayPal-Request-Id` idempotency
-- **AI:** Claude (`claude-opus-5-5`) via the Anthropic TypeScript SDK, used for:
-  - structured-output intake
+- **AI:** **NVIDIA Nemotron** (`nvidia/nemotron-3.5-super-vl-120b-a12b`, text + vision) through the NVIDIA API catalog (build.nvidia.com), used for:
+  - structured intake (JSON validated with Zod)
   - provider agent pitches
   - promise checks
   - vision proof checks
 
-  Every AI step has a deterministic fallback, so the app runs without a key.
+  **Every NVIDIA request is metered**: credits count down from your balance, with tokens, latency and purpose per call. The count is persisted, shown on the Trust page, and available at `GET /api/ai/usage` and via `npm run nvidia:check`. Claude (`claude-opus-5-5`) is supported as an alternative provider. Every AI step has a deterministic fallback, so the app runs without any key.
 - **Model Context Protocol** TypeScript SDK (provider-facing MCP server)
+- **AG Grid Enterprise** (Trust page audit log with filters and row grouping, AI usage grid, sealed-offer comparison on every job)
 - **Bryntum Scheduler** (booked jobs view; trial package, so it shows a watermark)
 - **three.js** (real-time 3D claw that holds the card and follows the job's state), **GSAP + ScrollTrigger** (motion), **Lenis** (smooth scroll)
 - Node 22, TypeScript, Express 5, Zod 4
@@ -72,10 +73,11 @@ Visual direction was inspired by the "Daily Bank" fintech concept by Nixtio on D
 ## Run it
 ```bash
 npm install
-cp .env.example .env      # fill PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET (sandbox), ADMIN_TOKEN; ANTHROPIC_API_KEY optional
+cp .env.example .env      # fill PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET (sandbox), ADMIN_TOKEN; NVIDIA_API_KEY (or ANTHROPIC_API_KEY) and AG_GRID_LICENSE_KEY optional
 npm run dev               # http://localhost:3000
 npm test                  # 16 tests: clearing, commit–reveal, policy gate, audit chain, proof, reauthorize, full solo + group flows
 npm run sandbox:check     # confirms your PayPal sandbox keys work (prints no secrets)
+npm run nvidia:check      # confirms the NVIDIA key + models work and prints credits left (spends 2 credits)
 npm run demo              # with the server running: drives every flow end to end and fills the app with realistic jobs
 ```
 `npm run demo` resets the demo, then runs eight real scenarios through the same HTTP API the UI uses, checking each result:
@@ -113,7 +115,7 @@ AEONITH_URL=http://localhost:3000 PROVIDER_ID=acme PROVIDER_NAME="Acme Plumbing"
 Tools: `list_open_requests`, `submit_sealed_bid`, `reveal_bid`, `get_result`.
 
 ## Honest limits
-- The provider agents in the demo are **simulated** (our cost models plus Claude-written pitches). The protocol is real and open.
+- The provider agents in the demo are **simulated** (our cost models plus AI-written pitches). The protocol is real and open.
 - A photo proves **visible completion**, not workmanship quality. PayPal Purchase Protection and refunds still apply.
 - The demo console shows all roles on one page. A production app would separate buyer, provider and admin views.
 - In the demo Aeonith is merchant of record and pays providers with Payouts. Production would use PayPal's multiparty/platform onboarding.
