@@ -139,9 +139,73 @@ export interface JobRequest {
   reveals: Reveal[];
   award?: Award;
   aiOfferReview?: { ok: boolean; summary: string; flags: string[] };
+  /** Autopilot: the job was filed by a home sensor and funded from the buyer's vaulted PayPal (merchant-initiated). */
+  autopilotId?: string;
+  trigger?: { device: string; location: string; reading: string; at: string };
+  /** Autopilot jobs need the buyer's consent (Voice Agent call) before the pro is dispatched. */
+  bookedAt?: string;
+  /** Consents captured by the Voice Agent (spoken or tapped), each fingerprinted into the audit chain. */
+  consents?: Consent[];
+  /** Agent phone calls: consent calls to the buyer, recruiting calls to offline pros. */
+  calls?: CallLog[];
+  /** Offline pros the agent recruited for this job (they bid like any provider, paid by Payouts to email). */
+  recruited?: Provider[];
+  /** Live Proof session: a code shown only once the camera session starts, valid for two minutes. */
+  live?: LiveSession;
   proof?: Proof;
   buyerConfirmedAt?: string;
   settlement?: Settlement;
+}
+
+export interface Consent {
+  intent: "book" | "release";
+  method: "voice" | "tap";
+  transcript: string;
+  approved: boolean;
+  at: string;
+  /** SHA-256 of intent|transcript|at|request: the fingerprint written to the audit chain. */
+  sha256: string;
+}
+
+export interface CallLog {
+  id: string;
+  kind: "consent" | "recruit";
+  at: string;
+  party: string;
+  phone?: string;
+  lines: { who: "agent" | "buyer" | "pro"; text: string }[];
+  outcome: string;
+}
+
+export interface LiveFrame {
+  at: string;
+  sha256: string;
+  codeVisible: boolean | null;
+  matchesJob: boolean | null;
+  summary: string;
+}
+
+export interface LiveSession {
+  code: string;
+  startedAt: string;
+  expiresAt: string;
+  frames: LiveFrame[];
+  finishedAt?: string;
+}
+
+/** A standing, buyer-approved budget that lets a home sensor file and fund a job on the buyer's vaulted PayPal. */
+export interface Autopilot {
+  id: string;
+  buyerName: string;
+  zip: string;
+  capCents: Cents;
+  categories: string[];
+  status: "pending" | "active" | "revoked";
+  setupTokenId?: string;
+  vaultId?: string;
+  customerId?: string;
+  createdAt: string;
+  activatedAt?: string;
 }
 
 export interface Settlement {
@@ -184,4 +248,7 @@ export interface Provider {
   warrantyMonths: number;
   /** Earliest available start offset in hours. */
   leadHours: number;
+  /** Recruited by the agent's phone call (not previously on Aeonith). */
+  recruited?: boolean;
+  phone?: string;
 }

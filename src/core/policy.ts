@@ -1,4 +1,4 @@
-import type { BuyerHold, Cents, JobRequest } from "../domain/types.js";
+import type { Autopilot, BuyerHold, Cents, JobRequest } from "../domain/types.js";
 
 /**
  * The payment policy gate. EVERY PayPal money call goes through `enforce` first.
@@ -6,7 +6,7 @@ import type { BuyerHold, Cents, JobRequest } from "../domain/types.js";
  */
 
 export type MoneyAction =
-  | { kind: "HOLD"; request: JobRequest; buyer: BuyerHold; amountCents: Cents; maxAuthCents: Cents }
+  | { kind: "HOLD"; request: JobRequest; buyer: BuyerHold; amountCents: Cents; maxAuthCents: Cents; autopilot?: Autopilot }
   | { kind: "CAPTURE"; request: JobRequest; buyer: BuyerHold; amountCents: Cents; approvedBy: "buyer" | "admin" | null }
   | { kind: "VOID"; request: JobRequest; buyer: BuyerHold }
   | { kind: "PAYOUT"; request: JobRequest; amountCents: Cents; receiver: string; expectedReceiver: string; capturedTotalCents: Cents }
@@ -35,6 +35,12 @@ export function enforce(a: MoneyAction): void {
       if (a.amountCents <= 0) deny("hold-amount", "hold must be positive");
       if (a.amountCents > a.maxAuthCents) deny("max-hold", `hold exceeds the per-person cap`);
       if (!["open", "bidding"].includes(a.request.status)) deny("state", `request is ${a.request.status}`);
+      if (a.request.autopilotId) {
+        // Merchant-initiated hold without the buyer present: only inside the budget and categories they approved.
+        if (!a.autopilot || a.autopilot.id !== a.request.autopilotId || a.autopilot.status !== "active" || !a.autopilot.vaultId) deny("autopilot", "no active Autopilot approval for this buyer");
+        if (a.amountCents > a.autopilot!.capCents) deny("autopilot-cap", "hold exceeds the buyer's Autopilot budget");
+        if (!a.autopilot!.categories.includes(a.request.category)) deny("autopilot-scope", `Autopilot doesn't cover ${a.request.category}`);
+      }
       return;
     }
     case "CAPTURE": {

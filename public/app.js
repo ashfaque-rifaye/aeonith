@@ -119,12 +119,13 @@ const NAV = [
   { id: "home", label: "Home", icon: "home", href: "#/home" },
   { id: "jobs", label: "Jobs", icon: "jobs", href: "#/jobs" },
   { id: "new", label: "Post a job", icon: "plus", href: "#/new", fab: true },
-  { id: "pros", label: "Pros", icon: "pros", href: "#/pros" },
+  { id: "autopilot", label: "Autopilot", icon: "bolt", href: "#/autopilot" },
+  { id: "pros", label: "Pros", icon: "pros", href: "#/pros", desk: true },
   { id: "trust", label: "Trust", icon: "shield", href: "#/trust" },
 ];
 function renderNav(active) {
   $("#side-nav").innerHTML = NAV.filter((n) => !n.fab).map((n) => `<a href="${n.href}" class="${n.id === active ? "active" : ""} ${n.fab ? "cta" : ""}">${ic(n.icon)}<span>${n.label}</span></a>`).join("");
-  $("#tabbar").innerHTML = NAV.map((n) => n.fab
+  $("#tabbar").innerHTML = NAV.filter((n) => !n.desk).map((n) => n.fab
     ? `<a href="${n.href}" class="fab" aria-label="${n.label}"><span class="fab-btn">${ic("plus")}</span></a>`
     : `<a href="${n.href}" class="${n.id === active ? "active" : ""}">${ic(n.icon)}<span>${n.label}</span></a>`).join("");
 }
@@ -174,6 +175,7 @@ const LABEL = {
   "bidding.opened": "bidding opened", "bid.committed": "sealed bid committed", "bidding.closed": "bidding closed", "bid.revealed": "bid revealed ✓ hash", "bid.reveal_rejected": "reveal REJECTED",
   "award.made": "winner chosen (deterministic)", "award.none": "no feasible bid", "offer.reviewed": "promise check", "proof.challenge_issued": "proof code issued", "proof.submitted": "proof submitted",
   "job.confirmed": "homeowner confirmed", "hold.captured": "capture", "hold.voided": "hold released", "hold.reauthorized": "hold renewed", "payout.created": "payout to pro",
+  "sensor.alert": "sensor alert", "consent.voice": "consent on call", "recruit.call": "recruiting call", "proof.live_started": "live proof started", "proof.live_frame": "live frame checked",
   "settlement.approved": "settlement approved", "request.released": "all holds released", blocked: "POLICY BLOCKED", webhook: "webhook",
 };
 const feedLines = (entries, n = 8) => entries.slice(-n).reverse().map((e) => {
@@ -325,12 +327,16 @@ function viewJob(r) {
         </div>
         <div class="flow" aria-label="Progress">${FLOW.map(([n, i], k) => `<div class="s ${done[k] ? "done" : k === nowIdx ? "now" : ""}"><span class="n">${done[k] ? ic("check") : ic(i)}</span>${n}</div>`).join("")}</div>
       </div>
+      ${autopilotBanner(r)}
       <div class="mc-mobile">${vault(r)}</div>
       ${peopleCard(r)}
       ${bidsCard(r)}
       ${winnerCard(r)}
+      ${liveCard(r)}
       ${proofCard(r)}
+      ${callsCard(r)}
       ${receiptCard(r)}
+      ${paypalRailCard(r)}
     </div>
     <aside class="rail">${vault(r)}
       <div class="card"><div class="card-head"><h3>${ic("terminal", "inline")} Agent console</h3><span class="small muted mono">${jobFeed.length} events</span></div>
@@ -346,10 +352,11 @@ function nextAction(r) {
   if (["open", "bidding"].includes(r.status) && anyHeld && r.commitments.length === 0) return { id: "run", label: "Invite pros' agents to bid" };
   if (r.status === "bidding" && r.commitments.length) return { id: "close", label: "Unseal bids & pick winner" };
   if (["open", "bidding"].includes(r.status) && r.mode === "together" && pending) return { id: "scroll", target: "people", label: "Neighbours: approve holds" };
+  if (r.status === "awarded" && r.autopilotId && !r.bookedAt) return { id: "call", intent: "book", label: "Answer your agent's call" };
+  if (r.status === "awarded" && r.live && !r.live.finishedAt) return { id: "scroll", target: "live", label: "Pro: show the job on camera" };
   if (r.status === "awarded" && !r.proof) return { id: "challenge", label: "Pro: start job · get code" };
   if (r.status === "awarded" && r.proof) return { id: "scroll", target: "proof", label: "Pro: upload proof photo" };
-  if (r.status === "proving" && r.proof?.verdict !== "pass" && !r.buyerConfirmedAt && r.proof?.verdict !== "fail") return { id: "confirm", label: "Confirm the job is done" };
-  if (r.status === "proving" && (r.proof?.verdict === "pass" || r.buyerConfirmedAt)) return { id: "settle", label: "Release payment via PayPal" };
+  if (r.status === "proving" && r.proof?.verdict !== "fail") return { id: "call", intent: "release", label: "Agent call: release payment" };
   return null;
 }
 
@@ -424,7 +431,7 @@ function bidsCard(r) {
   if (!r.commitments.length) {
     const can = ["open", "bidding"].includes(r.status) && r.buyers.some((b) => b.status === "held");
     return `<div class="card fade-in"><div class="card-head"><div><h3>Sealed bids</h3><div class="small muted" style="margin-top:4px">Pros' agents see job, area and funded homes. Never your limit.</div></div></div>
-      <div class="note">${ic("info")}<div>${can ? "Your request is funded. Invite pros' agents to submit sealed bids." : "Approve a PayPal hold first. Pros only bid on funded jobs."}</div></div></div>`;
+      <div class="note">${ic("info")}<div>${can ? "Your request is funded. Invite pros' agents to submit sealed bids." : "Approve a PayPal hold first. Pros only bid on funded jobs."}</div></div>${r.status === "bidding" ? recruitBtn() : ""}</div>`;
   }
   const animate = ui.justRevealed === r.id;
   const items = r.commitments.map((c, i) => {
@@ -444,7 +451,7 @@ function bidsCard(r) {
            ${row && !win ? `<div class="why">${esc(row.note)}</div>` : ""}`}
     </div>`;
   }).join("");
-  return `<div class="card fade-in"><div class="card-head"><div><h3>Sealed bids</h3><div class="small muted" style="margin-top:4px">Each agent committed a SHA-256 fingerprint. Nobody, including us, can read a bid before it closes.</div></div><span class="chip">${r.commitments.length} bids</span></div>
+  return `<div class="card fade-in"><div class="card-head"><div><h3>Sealed bids</h3><div class="small muted" style="margin-top:4px">Each agent committed a SHA-256 fingerprint. Nobody, including us, can read a bid before it closes.</div></div><span class="chip">${r.commitments.length} bids</span></div>${r.status === "bidding" ? recruitBtn() : ""}
     <div class="bids">${items}</div></div>`;
 }
 
@@ -477,7 +484,8 @@ function proofCard(r) {
     <div class="card-head"><div><h3>Proof of completion</h3><div class="small muted" style="margin-top:4px">The pro photographs the finished job with this one-time code written in the frame.</div></div></div>
     ${p ? `<div class="ticket"><div class="code">${esc(p.code)}</div><div class="small"><b>Issued ${esc(when(p.issuedAt))}</b><br><span class="muted">Code rejects reused or stale photos. AI vision reads the code and checks the work.</span></div></div>`
       : `<div class="note">${ic("camera")}<div>When the pro starts, they receive a one-time code. Money only moves after photo proof.</div></div>`}
-    ${p && r.status === "awarded" ? `<form data-proof class="stack" style="margin-top:14px">
+    ${r.status === "awarded" && !(r.live && !r.live.finishedAt) && (!r.autopilotId || r.bookedAt) ? `<div class="live-cta"><button class="btn primary" data-live>${ic("camera")}Start Live Proof (camera)</button><span class="small muted">Code appears only when the session starts and expires in 2 minutes.</span></div>` : ""}
+    ${p && r.status === "awarded" && !(r.live && !r.live.finishedAt) ? `<form data-proof class="stack" style="margin-top:14px">
       <label class="upload" id="drop">${ic("upload")}<b>Upload the completion photo</b><span class="small muted">code ${esc(p.code)} must be visible</span><input type="file" name="photo" accept="image/*" capture="environment" required /></label>
       <label class="field">Note from the pro<input class="input" name="note" placeholder="Replaced 40-gal unit, old one hauled away" /></label>
       <button class="btn primary" type="submit">${ic("camera")}Submit proof</button></form>` : ""}
@@ -759,6 +767,263 @@ function scrambleHashes(root) {
   });
 }
 
+const recruitBtn = () => `<div class="row" style="margin-top:12px;gap:10px;flex-wrap:wrap"><button class="btn" data-recruit>${ic("users")}Have my agent call local pros</button><span class="small muted">Pitches offline pros on your funded job. Winners are paid by PayPal Payouts to email.</span></div>`;
+
+// ---------- PayPal rail (every PayPal API object behind this job) ----------
+const PP_API = {
+  "order.created": (d) => ["Orders v2", "Create order · intent AUTHORIZE", d.orderId, d.amount && `$${d.amount}`],
+  "hold.authorized": (d) => d.via ? ["Vault v3 + Orders v2", "Merchant-initiated AUTHORIZE on vaulted wallet", d.authorizationId, d.amount && `$${d.amount} held`] : ["Orders v2", "Authorize order → hold placed", d.authorizationId, d.amount && `$${d.amount} held`],
+  "hold.reauthorized": (d) => ["Payments v2", "Reauthorize (3-day honor period)", d.to, ""],
+  "hold.captured": (d) => ["Payments v2", "Capture · final_capture: true", d.captureId, `$${d.amount} captured · $${d.released} released`],
+  "hold.voided": (d) => ["Payments v2", "Void authorization", d.authorizationId, "$0 charged"],
+  "payout.created": (d) => ["Payouts v1", "Batch payout to the pro", d.batchId, `$${d.amount} · fee $${d.fee}`],
+  webhook: (d) => ["Webhooks", `Verified ${d.type}`, d.authorizationId, ""],
+  blocked: (d) => ["Policy gate", `Blocked before PayPal: ${d.rule}`, d.action, ""],
+};
+function paypalRailCard(r) {
+  const rows = audit.entries.filter((e) => e.requestId === r.id && PP_API[e.action] && (e.actor === "paypal" || e.action === "blocked"));
+  if (!rows.length) return "";
+  return `<div class="card fade-in pprail"><div class="card-head"><div><div class="eyebrow">PayPal rail</div><h3 style="margin-top:6px">Every PayPal call behind this job</h3></div><span class="chip ${health?.paypal === "sandbox" ? "ok" : "warn"}">${health?.paypal === "sandbox" ? "live sandbox" : "simulated"}</span></div>
+    <ol class="pp-steps">${rows.map((e) => {
+      const [api, what, id, amt] = PP_API[e.action](e.data || {});
+      return `<li class="${e.action === "blocked" ? "bad" : ""}"><span class="pp-api">${esc(api)}</span><div><b>${esc(what)}</b>${id ? `<div class="mono small muted">${esc(id)}</div>` : ""}</div><span class="pp-amt">${esc(amt || "")}</span><span class="pp-t mono">${hhmm(e.at)}</span></li>`;
+    }).join("")}</ol></div>`;
+}
+
+// ---------- Autopilot banner on sensor-filed jobs ----------
+function autopilotBanner(r) {
+  if (!r.trigger) return "";
+  const b = r.buyers[0];
+  return `<div class="card fade-in ap-banner"><span class="ap-ico">${ic("bolt")}</span><div style="min-width:0"><div class="eyebrow">Filed by your home · Autopilot</div>
+    <h3 style="margin-top:6px">${esc(r.trigger.device)}: ${esc(r.trigger.reading)}</h3>
+    <p class="muted small" style="margin:6px 0 0">${esc(r.trigger.location)} · ${esc(when(r.trigger.at))}. Funded from your vaulted PayPal without waking you: ${b?.authorizedCents ? `${usd(b.authorizedCents)} held (${esc(b.authorizationId || "")})` : "hold pending"}. ${r.bookedAt ? "You approved the booking on the call." : r.status === "awarded" ? "Nobody is dispatched until you approve on the call." : ""}</p></div></div>`;
+}
+
+// ---------- calls (consent + recruiting) ----------
+function callsCard(r) {
+  if (!r.calls?.length) return "";
+  return `<div class="card fade-in"><div class="card-head"><div><div class="eyebrow">Agent calls</div><h3 style="margin-top:6px">What your agent said, word for word</h3></div><span class="chip">${r.calls.length} call${r.calls.length === 1 ? "" : "s"}</span></div>
+    <div class="calls">${r.calls.slice().reverse().map((c) => `<details class="call" ${c === r.calls[r.calls.length - 1] ? "open" : ""}>
+      <summary><span class="call-ico">${ic(c.kind === "recruit" ? "users" : "q")}</span><div style="min-width:0"><b>${c.kind === "recruit" ? `Recruiting call · ${esc(c.party)}` : `Consent call · ${esc(c.party)}`}</b><div class="small muted">${esc(c.phone || "in-app call")} · ${esc(when(c.at))}</div></div><span class="chip ${/Declined/.test(c.outcome) ? "warn" : "ok"}">${esc(c.outcome)}</span></summary>
+      <div class="bubbles">${c.lines.map((l) => `<div class="bub ${l.who}"><small>${l.who === "agent" ? "Aeonith agent" : l.who === "pro" ? esc(c.party) : "You"}</small>${esc(l.text)}</div>`).join("")}</div>
+    </details>`).join("")}</div>
+    ${(r.consents || []).length ? `<div class="small muted mono" style="margin-top:10px">${r.consents.map((c) => `${c.intent} · ${c.method} · ${c.approved ? "approved" : "declined"} · sha256 ${c.sha256.slice(0, 16)}…`).join("<br>")}</div>` : ""}
+  </div>`;
+}
+
+// ---------- the incoming call (Voice Agent) ----------
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+function pickVoice() {
+  const vs = speechSynthesis?.getVoices?.() || [];
+  return vs.find((v) => /en-US/i.test(v.lang) && /Natural|Aria|Jenny|Ava|Online/i.test(v.name)) || vs.find((v) => /en-US/i.test(v.lang)) || vs[0];
+}
+function speak(text) {
+  // Captions advance on a reading-speed timer, so the call works with or without audio output.
+  const minMs = Math.max(1600, text.length * 58);
+  return new Promise((done) => {
+    let finished = false;
+    const end = () => { if (!finished) { finished = true; done(); } };
+    setTimeout(end, minMs + 900);
+    try {
+      if (!("speechSynthesis" in window) || ui.quietCall) return;
+      const u = new SpeechSynthesisUtterance(text);
+      const v = pickVoice();
+      if (v) u.voice = v;
+      u.rate = 1.02; u.pitch = 1;
+      u.onend = () => setTimeout(end, 250);
+      speechSynthesis.speak(u);
+    } catch { /* captions only */ }
+  });
+}
+async function openCall(r, intent) {
+  document.querySelector(".callx")?.remove();
+  const el = document.createElement("div");
+  el.className = "callx";
+  el.innerHTML = `<div class="callx-card" role="dialog" aria-label="Incoming call from your Aeonith agent">
+    <div class="callx-top"><span class="mono small">${intent === "book" ? "INCOMING · BOOKING APPROVAL" : "INCOMING · PAYMENT RELEASE"}</span><span class="mono small" id="cx-t">00:00</span></div>
+    <div class="callx-av"><span class="ring r1"></span><span class="ring r2"></span><span class="ring r3"></span><span class="av">${ic("spark")}</span></div>
+    <h2>Aeonith agent</h2><div class="small muted" id="cx-sub">calling about ${esc(r.title)}</div>
+    <div class="callx-wave" id="cx-wave">${Array.from({ length: 28 }, (_, i) => `<i style="animation-delay:${(i % 7) * 90}ms"></i>`).join("")}</div>
+    <div class="callx-caps" id="cx-caps"></div>
+    <div class="callx-heard" id="cx-heard"></div>
+    <div class="callx-actions" id="cx-act">
+      <button class="btn ghost" data-cx="decline">${ic("x")}Decline</button>
+      <button class="btn primary" data-cx="accept">${ic("check")}Accept</button>
+    </div>
+    <div class="callx-foot small muted">Your answer is fingerprinted (SHA-256) into the audit chain. ${SR ? "Speak, or tap." : "Tap to answer (no microphone here)."}</div>
+  </div>`;
+  document.body.append(el);
+  requestAnimationFrame(() => el.classList.add("in"));
+  const t0 = Date.now();
+  const clock = setInterval(() => { const s = Math.floor((Date.now() - t0) / 1000); const c = el.querySelector("#cx-t"); if (c) c.textContent = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`; }, 500);
+  const close = () => { clearInterval(clock); try { speechSynthesis.cancel(); } catch {} el.classList.remove("in"); setTimeout(() => el.remove(), 300); };
+  const act$ = el.querySelector("#cx-act");
+  const caps = el.querySelector("#cx-caps");
+  const answer = async (transcript, method) => {
+    act$.innerHTML = `<span class="caret small">Recording consent</span>`;
+    el.querySelector("#cx-heard").innerHTML = `<b>You:</b> “${esc(transcript)}”`;
+    try {
+      const out = await post(`/api/requests/${r.id}/voice`, { intent, transcript, method });
+      const ok = out.consent.approved;
+      await speak(ok ? (intent === "book" ? "Booked. I'll call you again when the proof is in." : "Done. PayPal captured the payment and the pro is being paid.") : "Understood. Nothing moves until you say so.");
+      el.querySelector("#cx-sub").innerHTML = `${ok ? "Approved" : "Declined"} · <span class="mono">sha256 ${out.consent.sha256.slice(0, 12)}…</span>`;
+      toast(ok ? (intent === "book" ? "Booked by voice. Proof code issued to the pro." : "Released by voice: captured on PayPal and paid out.") : "Declined on the call. Nothing moved.");
+    } catch (e) { toast(e.message, 6000); }
+    setTimeout(async () => { close(); await load(); render({ animate: false }); }, 1400);
+  };
+  el.querySelector("[data-cx=decline]").addEventListener("click", () => answer("No, not now.", "tap"));
+  el.querySelector("[data-cx=accept]").addEventListener("click", async () => {
+    el.classList.add("live");
+    act$.innerHTML = `<span class="caret small">On the call</span>`;
+    let script;
+    try { script = await api(`/api/requests/${r.id}/call?intent=${intent}`); } catch (e) { toast(e.message); close(); return; }
+    for (const line of script.lines) {
+      const p = document.createElement("p");
+      p.textContent = line;
+      caps.append(p);
+      requestAnimationFrame(() => p.classList.add("on"));
+      caps.scrollTop = caps.scrollHeight;
+      await speak(line);
+    }
+    el.classList.add("listening");
+    const yes = intent === "book" ? "Approve, book them" : "Release payment";
+    act$.innerHTML = `<button class="btn ghost" data-a="no">${ic("x")}Not now</button>${SR ? `<button class="btn" data-a="mic">${ic("q")}Speak</button>` : ""}<button class="btn primary" data-a="yes">${ic("check")}${esc(yes)}</button>`;
+    act$.querySelector("[data-a=no]").addEventListener("click", () => answer("No, not now.", "tap"));
+    act$.querySelector("[data-a=yes]").addEventListener("click", () => answer(yes + ".", "tap"));
+    act$.querySelector("[data-a=mic]")?.addEventListener("click", () => {
+      const rec = new SR();
+      rec.lang = "en-US"; rec.interimResults = true; rec.maxAlternatives = 1;
+      const heard = el.querySelector("#cx-heard");
+      let finalText = "";
+      rec.onresult = (ev) => { finalText = [...ev.results].map((x) => x[0].transcript).join(" "); heard.innerHTML = `<b>You:</b> “${esc(finalText)}”`; };
+      rec.onerror = () => toast("Couldn't hear you. Tap instead.");
+      rec.onend = () => { if (finalText.trim()) answer(finalText.trim(), "voice"); };
+      heard.innerHTML = `<span class="caret small">Listening</span>`;
+      rec.start();
+    });
+  });
+}
+
+// ---------- Live Proof (camera) ----------
+const liveCam = { stream: null, timer: null, busy: false };
+function stopLiveCam() { clearInterval(liveCam.timer); liveCam.timer = null; liveCam.stream?.getTracks().forEach((t) => t.stop()); liveCam.stream = null; }
+function liveCard(r) {
+  const L = r.live;
+  if (!L || L.finishedAt || r.status !== "awarded") return "";
+  const left = Math.max(0, Math.round((Date.parse(L.expiresAt) - Date.now()) / 1000));
+  return `<div class="card fade-in live" id="live">
+    <div class="card-head"><div><div class="eyebrow">Live Proof · camera</div><h3 style="margin-top:6px">Show the finished job, with this code in frame</h3></div><span class="chip ${left > 20 ? "lime" : "warn"}" id="lv-left">${left}s left</span></div>
+    <div class="live-grid">
+      <div class="live-cam"><video id="lv-video" playsinline muted autoplay></video><div class="live-code">${esc(L.code)}</div><span class="rec"><i></i>LIVE</span><div class="live-scan"></div></div>
+      <div class="live-side">
+        <div class="small"><b>Pro:</b> write <span class="mono">${esc(L.code)}</span> on paper, put it next to the finished work, then open the camera.</div><div class="small muted" style="margin-top:6px">The code was created when this session started and dies in 2 minutes, so an old photo or video can't pass. NVIDIA vision checks frames as they arrive.</div>
+        <ol class="frames" id="lv-frames">${L.frames.map(frameRow).join("")}</ol>
+        <div class="row" style="gap:8px;margin-top:10px"><button class="btn primary" data-lv="cam">${ic("camera")}Code written down: open camera</button><button class="btn" data-lv="snap">${ic("camera")}Check a frame now</button><button class="btn primary" data-lv="finish" ${L.frames.length ? "" : "disabled"}>${ic("check")}Finish proof</button></div>
+      </div>
+    </div></div>`;
+}
+const frameRow = (f, i) => `<li><span class="mono small">#${i + 1} ${hhmm(f.at)}</span><span class="chip ${f.codeVisible === true ? "ok" : f.codeVisible === false ? "bad" : ""}">code ${f.codeVisible === true ? "✓" : f.codeVisible === false ? "✗" : "?"}</span><span class="chip ${f.matchesJob === true ? "ok" : f.matchesJob === false ? "bad" : ""}">work ${f.matchesJob === true ? "✓" : f.matchesJob === false ? "✗" : "?"}</span><small class="muted">${esc(f.summary || "")}</small></li>`;
+async function wireLive(r) {
+  const card = $("#live");
+  if (!card) { stopLiveCam(); return; }
+  const video = $("#lv-video");
+  const openCam = async () => {
+    try {
+      liveCam.stream ??= await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+      video.srcObject = liveCam.stream;
+      card.querySelector("[data-lv=cam]")?.remove();
+      clearInterval(liveCam.timer);
+      liveCam.timer = setInterval(snap, 3500);
+      setTimeout(snap, 1800);
+    } catch { toast("Camera unavailable: allow camera access, or use the photo upload instead.", 6000); }
+  };
+  if (liveCam.stream) { video.srcObject = liveCam.stream; card.querySelector("[data-lv=cam]")?.remove(); }
+  const left = $("#lv-left");
+  const tick = setInterval(() => { const s = Math.max(0, Math.round((Date.parse(r.live.expiresAt) - Date.now()) / 1000)); if (left) left.textContent = `${s}s left`; if (!s) clearInterval(tick); }, 1000);
+  ui.timers.push(tick);
+  const snap = async () => {
+    if (liveCam.busy || !video.videoWidth) return;
+    liveCam.busy = true;
+    try {
+      const w = Math.min(960, video.videoWidth), h = Math.round((w / video.videoWidth) * video.videoHeight);
+      const c = document.createElement("canvas"); c.width = w; c.height = h;
+      c.getContext("2d").drawImage(video, 0, 0, w, h);
+      const b64 = c.toDataURL("image/jpeg", 0.85).split(",")[1];
+      card.classList.add("checking");
+      const out = await post(`/api/requests/${r.id}/live/frame`, { imageBase64: b64 });
+      r.live.frames.push(out.frame);
+      $("#lv-frames").innerHTML = r.live.frames.map(frameRow).join("");
+      card.querySelector("[data-lv=finish]").disabled = false;
+      if (out.done || r.live.frames.length >= 6) await finish();
+    } catch (e) { toast(e.message, 5000); clearInterval(liveCam.timer); }
+    finally { liveCam.busy = false; card.classList.remove("checking"); }
+  };
+  const finish = async () => {
+    clearInterval(liveCam.timer);
+    const p = await post(`/api/requests/${r.id}/live/finish`);
+    stopLiveCam();
+    toast(`Live Proof verdict: ${p.verdict}`);
+    await load(); render({ animate: false });
+  };
+  card.querySelector("[data-lv=cam]")?.addEventListener("click", openCam);
+  card.querySelector("[data-lv=snap]").addEventListener("click", snap);
+  card.querySelector("[data-lv=finish]").addEventListener("click", (e) => act(e.currentTarget, finish, { rerender: false }));
+  if (liveCam.stream && !liveCam.timer) liveCam.timer = setInterval(snap, 3500);
+}
+
+// ---------- Autopilot page ----------
+function viewAutopilot(list) {
+  const active = list.filter((a) => a.status === "active");
+  return `<div style="margin-bottom:16px"><div class="eyebrow">Autopilot · PayPal Vault</div><h2 style="margin-top:6px">Your home <span class="grad">files the job itself</span></h2>
+    <p class="muted" style="margin:8px 0 0;max-width:720px">Save PayPal once with a budget. When a sensor reports an emergency, Aeonith files the job, places a <b>hold</b> on your vaulted PayPal (no redirect, you can be asleep), and pros bid. Nobody is dispatched and nothing is charged until your agent calls and you say "approve".</p></div>
+  <div class="grid-2">
+    <form class="card fade-in" id="ap-form">
+      <div class="card-head"><h3>${ic("lock", "inline")} Turn on Autopilot</h3><span class="chip">${health?.paypal === "sandbox" ? "PayPal sandbox" : "simulated"}</span></div>
+      <div class="form-grid">
+        <label class="field">Your name<input class="input" name="buyerName" value="Maria G." /></label>
+        <label class="field">ZIP<input class="input" name="zip" value="78704" inputmode="numeric" /></label>
+        <label class="field">Emergency budget per job ($)<input class="input" name="capDollars" type="number" min="1" value="450" /></label>
+        <div class="field">Covers<div class="chips" style="margin-top:6px">${["plumbing", "electrical", "hvac"].map((c, i) => `<label class="chip"><input type="checkbox" name="cat" value="${c}" ${i === 0 ? "checked" : ""} /> ${cat(c).label}</label>`).join("")}</div></div>
+      </div>
+      <div class="note" style="margin-top:14px">${ic("info")}<div>PayPal <b>Vault v3</b>: you approve a setup token once. Each emergency is then an <b>Orders v2 AUTHORIZE</b> on your vaulted wallet (merchant-initiated), capped by this budget in our policy gate. You can turn it off at any time.</div></div>
+      <button class="btn primary block" type="submit" style="margin-top:14px">Save PayPal for Autopilot ${ic("arrow")}</button>
+    </form>
+    <div class="card fade-in">
+      <div class="card-head"><h3>${ic("bolt", "inline")} Your Autopilots</h3><span class="chip">${active.length} active</span></div>
+      ${list.length ? list.map((a) => `<div class="ap-row"><div style="min-width:0"><b>${esc(a.buyerName)} · up to ${usd0(a.capCents)}</b><div class="small muted mono">${a.vaultId ? `vault ${esc(a.vaultId)}` : `setup ${esc(a.setupTokenId || "")}`}</div><div class="small muted">${a.categories.map((c) => cat(c).label).join(" · ")} · ${esc(a.zip)}</div></div>
+        <span class="chip ${a.status === "active" ? "ok" : a.status === "pending" ? "warn" : ""}">${a.status}</span></div>
+        ${a.status === "active" ? `<form class="sensor" data-sensor="${a.id}">
+          <div class="small" style="font-weight:600;margin-bottom:8px">${ic("spark", "inline")} Simulate a sensor alert</div>
+          <div class="form-grid"><label class="field">Device<select class="input" name="device"><option>Leak sensor</option><option>Smart thermostat</option><option>Smart breaker panel</option></select></label>
+          <label class="field">Where<input class="input" name="location" value="Garage water heater" /></label>
+          <label class="field full">Reading<input class="input" name="reading" value="Water detected on the floor" /></label></div>
+          <div class="row" style="gap:8px;margin-top:10px"><button class="btn primary" type="submit">${ic("bolt")}Trigger alert</button><button class="btn ghost" type="button" data-revoke="${a.id}">Turn off</button></div>
+        </form>` : ""}`).join("") : `<div class="empty">No Autopilot yet.</div>`}
+    </div>
+  </div>`;
+}
+function wireAutopilot() {
+  $("#ap-form")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    act(e.submitter, async () => {
+      const out = await post("/api/autopilot", { buyerName: f.get("buyerName"), zip: f.get("zip"), capDollars: Number(f.get("capDollars")), categories: f.getAll("cat") });
+      location.href = out.approveUrl;
+    }, { rerender: false });
+  });
+  document.querySelectorAll("[data-sensor]").forEach((form) => form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const f = new FormData(form);
+    act(e.submitter, async () => {
+      toast("Sensor alert received. Filing and funding the job…", 6000);
+      const r = await post(`/api/autopilot/${form.dataset.sensor}/sensor`, { device: f.get("device"), location: f.get("location"), reading: f.get("reading") });
+      ui.ringOn = r.id;
+      location.hash = `#/job/${r.id}`;
+    }, { rerender: false });
+  }));
+  document.querySelectorAll("[data-revoke]").forEach((b) => b.addEventListener("click", () => act(b, () => post(`/api/autopilot/${b.dataset.revoke}/revoke`))));
+}
+
 // ---------- router ----------
 function route() {
   const h = location.hash.replace(/^#\/?/, "") || "home";
@@ -768,6 +1033,7 @@ function route() {
 async function render({ animate = true } = {}) {
   ui.timers.forEach(clearInterval);
   ui.timers = [];
+  if (route().name !== "job") stopLiveCam();
   const { name, id } = route();
   const view = $("#view");
   renderNav(name === "job" ? "jobs" : name);
@@ -782,6 +1048,8 @@ async function render({ animate = true } = {}) {
     if (r) {
       wireJob(r);
       mountBidGrid(r);
+      wireLive(r);
+      if (ui.ringOn === r.id && r.status === "awarded" && r.autopilotId && !r.bookedAt) { ui.ringOn = null; setTimeout(() => openCall(r, "book"), 900); }
       const next = nextAction(r);
       if (next) {
         const bar = document.createElement("div");
@@ -795,6 +1063,7 @@ async function render({ animate = true } = {}) {
     ui.justRevealed = null;
   } else if (name === "new") { view.innerHTML = viewNew(); wireNew(); }
   else if (name === "pros") { view.innerHTML = `<div class="skeleton"></div>`; const s = await api("/protocol/v1/requests"); view.innerHTML = viewPros(s); mountScheduler(); }
+  else if (name === "autopilot") { const list = await api("/api/autopilot").catch(() => []); view.innerHTML = viewAutopilot(list); wireAutopilot(); }
   else if (name === "trust") { const usage = await api("/api/ai/usage").catch(() => null); view.innerHTML = viewTrust(usage); mountTrustGrids(usage); }
   else { location.hash = "#/home"; return; }
   animateNumbers(view);
@@ -853,6 +1122,7 @@ function wireHome() {
 async function runNext(r, next, btn) {
   if (next.id === "scroll") { document.getElementById(next.target)?.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
   if (next.id === "hold") return startHold(r, next.buyer, btn);
+  if (next.id === "call") return openCall(r, next.intent);
   const map = {
     run: async () => { const res = await post(`/api/requests/${r.id}/run-providers`); toast(`${res.length} pro agents sealed a bid`); },
     close: async () => { await post(`/api/requests/${r.id}/close-bidding`); const out = await post(`/api/requests/${r.id}/award`); ui.justRevealed = r.id; toast(out.award ? `${out.award.providerName} wins at ${usd(out.award.priceCents)}` : "No bid met your terms. Every hold was released."); },
@@ -900,6 +1170,12 @@ function wireJob(r) {
       });
     });
   }
+  v.querySelector("[data-live]")?.addEventListener("click", (e) => act(e.currentTarget, () => post(`/api/requests/${r.id}/live/start`)));
+  v.querySelectorAll("[data-recruit]").forEach((b) => b.addEventListener("click", (e) => act(e.currentTarget, async () => {
+    const calls = await post(`/api/requests/${r.id}/recruit`);
+    const joined = calls.filter((c) => c.outcome.startsWith("Joined")).length;
+    toast(`Your agent called ${calls.length} local pro${calls.length === 1 ? "" : "s"}: ${joined} joined with a sealed bid.`, 6000);
+  })));
   v.querySelectorAll("[data-overcharge]").forEach((b) => b.addEventListener("click", (e) => act(e.currentTarget, async () => {
     const res = await post(`/api/requests/${r.id}/try-overcharge`);
     toast(res.blocked ? `Blocked ✓ ${res.message}` : "Not blocked?!", 7000);
@@ -946,6 +1222,8 @@ async function boot() {
   const qs = new URLSearchParams(location.search);
   if (qs.get("r")) location.hash = `#/job/${qs.get("r")}`;
   if (qs.get("held")) setTimeout(() => toast("PayPal hold approved: reserved, not charged."), 300);
+  if (qs.get("vaulted")) { location.hash = "#/autopilot"; setTimeout(() => toast("PayPal saved for Autopilot (Vault). Holds only within your budget."), 300); }
+  if (qs.get("quiet")) ui.quietCall = true;
   if (qs.get("cancelled")) setTimeout(() => toast("Hold cancelled at PayPal. Nothing was reserved."), 300);
   if (qs.size) history.replaceState(null, "", "/" + location.hash);
   await load();

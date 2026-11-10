@@ -21,6 +21,15 @@ Built for the [PayPal AI Hackathon 2026](https://paypalaihackathon.devpost.com/)
 
 Every step is written to a **hash-chained audit log**. Editing any past entry breaks the chain.
 
+### Agentic features on PayPal rails
+| Feature | What happens | PayPal under it |
+|---|---|---|
+| **Autopilot: the home files the job itself** | You save PayPal once with an emergency budget (e.g. $450, plumbing). A leak sensor reports water at 3 a.m. Aeonith files the job, places a **hold on your vaulted PayPal with no redirect**, and pros' agents seal their bids before you wake up. Nobody is dispatched until you approve on a call. | **Vault v3** setup token → payment token, then **Orders v2 `AUTHORIZE` with `vault_id`** (merchant-initiated). The policy gate caps it at your budget and approved trades |
+| **Voice Agent** | Your agent rings you at the two money moments: "PayPal is holding $450. Lone Star won at $360, 12-month warranty. Say *approve* to book." and later "Proof passed. PayPal captures $360 and releases $90. Say *release payment*." Spoken (Web Speech) or tapped. Approval is decided by deterministic phrase matching, never by AI, and each answer is **SHA-256 fingerprinted into the audit chain**. | Your spoken "release payment" is the human approval the policy gate requires before **Payments v2 capture** and **Payouts** |
+| **Live Proof** | Instead of uploading a photo, the pro opens a camera session. The one-time code is created only when the session starts and **expires in 2 minutes**, so an old photo or video can't pass. NVIDIA vision reads the handwritten code and checks the work, frame by frame. | Proof is the gate for **capture**; no proof, nothing moves |
+| **Recruiting calls** | Too few bids? Your agent phones local pros who aren't on Aeonith yet and pitches the **already-funded** job: "PayPal is holding $400 on the buyer's account." Those who accept seal a bid through the same protocol. | Winners are paid by **Payouts to their email**: no PayPal account needed in advance; they claim the money (and join PayPal) |
+| **PayPal rail on every job** | A timeline of every PayPal object behind the job: order, authorization (or vaulted MIT authorization), reauthorization, capture with `final_capture`, voids and the Payouts batch, with IDs and amounts. | Read straight from the audit chain |
+
 ### What's technically new
 - **Commit–reveal sealed bids:** nobody, including Aeonith, can read or leak a bid early, and a revealed bid can't be changed.
 - **Offer Protocol as an MCP server** (`npm run mcp`): any MCP-capable provider agent can discover funded jobs and bid. The protocol has no field that can carry a buyer's limit, and a test proves it.
@@ -31,7 +40,8 @@ Every step is written to a **hash-chained audit log**. Editing any past entry br
 
 ## Built with
 - **PayPal (sandbox):**
-  - Orders v2: `AUTHORIZE`
+  - Orders v2: `AUTHORIZE` (buyer-approved), and `AUTHORIZE` with **`vault_id`** (merchant-initiated, Autopilot)
+  - **Vault v3**: setup tokens + payment tokens (save PayPal once for Autopilot)
   - Payments v2: partial capture with `final_capture`, void, reauthorize, refund
   - **Payouts v1**
   - Webhooks with `verify-webhook-signature`
@@ -75,12 +85,12 @@ Visual direction was inspired by the "Daily Bank" fintech concept by Nixtio on D
 npm install
 cp .env.example .env      # fill PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET (sandbox), ADMIN_TOKEN; NVIDIA_API_KEY (or ANTHROPIC_API_KEY) and AG_GRID_LICENSE_KEY optional
 npm run dev               # http://localhost:3000
-npm test                  # 16 tests: clearing, commit–reveal, policy gate, audit chain, proof, reauthorize, full solo + group flows
+npm test                  # 18 tests: clearing, commit–reveal, policy gate, audit chain, proof, reauthorize, solo + group + car-pool, Autopilot + Voice Agent + Live Proof
 npm run sandbox:check     # confirms your PayPal sandbox keys work (prints no secrets)
 npm run nvidia:check      # confirms the NVIDIA key + models work and prints credits left (spends 2 credits)
 npm run demo              # with the server running: drives every flow end to end and fills the app with realistic jobs
 ```
-`npm run demo` resets the demo, then runs eight real scenarios through the same HTTP API the UI uses, checking each result:
+`npm run demo` resets the demo, then runs ten real scenarios through the same HTTP API the UI uses, checking each result:
 
 | Scenario | Outcome |
 |---|---|

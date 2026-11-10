@@ -167,3 +167,51 @@ test("car pool from one dealership: $500 refundable deposits, sealed dealer bids
   assert.equal(r.settlement!.balanceDueCents, 4 * (3198000 - 50000));
   assert.equal(r.settlement!.payout!.amountCents, 200000 - 6000);
 });
+
+test("Autopilot: sensor files + funds a job on the vaulted wallet; Voice Agent books; Live Proof; voice release settles", async () => {
+  const { store, svc } = setup();
+  const { autopilot, approveUrl } = await svc.startAutopilot({ buyerName: "Maria G.", zip: "78704", capDollars: 450, categories: ["plumbing"] });
+  assert.match(approveUrl, /sim\/vault/);
+  await svc.completeAutopilot(autopilot.setupTokenId!);
+  assert.equal(store.autopilots.get(autopilot.id)!.status, "active");
+
+  const r = await svc.sensorAlert({ autopilotId: autopilot.id, device: "Leak sensor", location: "Garage water heater", reading: "Water detected" });
+  assert.equal(r.buyers[0].authorizedCents, 45000, "hold placed on the vaulted wallet without a redirect");
+  assert.equal(r.status, "awarded");
+  assert.throws(() => svc.issueChallenge(r.id), /booking/, "no dispatch before the buyer approves");
+
+  const script = svc.callScript(r.id, "book");
+  assert.ok(script.lines.some((l) => l.includes("$450.00")), "call states what PayPal holds");
+  const declinedFirst = await svc.voiceConsent(r.id, { intent: "book", transcript: "Approve. Book them.", method: "voice" });
+  assert.equal(declinedFirst.consent.approved, true);
+  assert.ok(r.proof?.code, "booking issues the proof code");
+
+  const live = svc.liveStart(r.id);
+  assert.match(live.code, /^AEON-/);
+  await svc.liveFrame(r.id, PNG);
+  const proof = svc.liveFinish(r.id);
+  assert.equal(proof.verdict, "review", "offline AI can't read the code: buyer decides");
+  const stop = await svc.voiceConsent(r.id, { intent: "release", transcript: "No, stop, not yet", method: "voice" });
+  assert.equal(stop.consent.approved, false);
+  assert.equal(r.status, "proving", "a no keeps the money on hold");
+  await svc.voiceConsent(r.id, { intent: "release", transcript: "Yes, release payment", method: "voice" });
+  assert.equal(r.status, "settled");
+  assert.ok(store.audit.all(r.id).some((e) => e.action === "consent.voice"));
+});
+
+test("Autopilot holds are blocked outside the approved budget and scope; recruiting calls add sealed bids", async () => {
+  const { store, svc } = setup();
+  const { autopilot } = await svc.startAutopilot({ buyerName: "Dev", zip: "78704", capDollars: 300, categories: ["electrical"] });
+  await assert.rejects(svc.sensorAlert({ autopilotId: autopilot.id, device: "Leak sensor", location: "Kitchen", reading: "Water detected" }), /isn't active/);
+  await svc.completeAutopilot(autopilot.setupTokenId!);
+  await assert.rejects(svc.sensorAlert({ autopilotId: autopilot.id, device: "Leak sensor", location: "Kitchen", reading: "Water detected" }), /doesn't cover plumbing/);
+
+  const solo = store.list().find((r) => r.mode === "solo")!;
+  const o = await svc.startHold(solo.id, solo.buyers[0].id);
+  await svc.completeHold(o.id);
+  svc.openBidding(solo.id);
+  const calls = await svc.recruit(solo.id);
+  assert.ok(calls.length >= 1 && calls.some((c) => c.outcome.startsWith("Joined")));
+  assert.ok(solo.commitments.some((c) => c.providerName === "Barton Creek Plumbing"));
+  assert.ok(calls[0].lines.some((l) => /PayPal Payouts/.test(l.text)));
+});

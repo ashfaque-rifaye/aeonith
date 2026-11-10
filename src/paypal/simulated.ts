@@ -87,6 +87,37 @@ export class SimulatedPayPal implements PaymentRail {
     return this.once(`payout:${a.senderBatchId}`, () => ({ batchId: `SIM-BATCH-${randomUUID().slice(0, 8).toUpperCase()}`, status: "SUCCESS" }));
   }
 
+  private setupTokens = new Map<string, { approved: boolean }>();
+  private vault = new Set<string>();
+
+  async createVaultSetupToken(a: { description: string; returnUrl: string; cancelUrl: string; requestId: string }) {
+    return this.once(`st:${a.requestId}`, () => {
+      const id = `SIM-SETUP-${randomUUID().slice(0, 8).toUpperCase()}`;
+      this.setupTokens.set(id, { approved: true });
+      const approveUrl = `${this.appBaseUrl}/sim/vault?token=${id}`;
+      return { id, approveUrl };
+    });
+  }
+
+  async createPaymentToken(setupTokenId: string, requestId: string) {
+    return this.once(`pt:${requestId}`, () => {
+      if (!this.setupTokens.get(setupTokenId)?.approved) throw new Error("Simulated PayPal: setup token not approved");
+      const vaultId = `SIM-VAULT-${randomUUID().slice(0, 8).toUpperCase()}`;
+      this.vault.add(vaultId);
+      return { vaultId, customerId: `SIM-CUST-${randomUUID().slice(0, 6).toUpperCase()}` };
+    });
+  }
+
+  async authorizeWithVault(a: { vaultId: string; amount: string; currency: string; description: string; customId: string; requestId: string }) {
+    return this.once(`vauth:${a.requestId}`, () => {
+      if (!this.vault.has(a.vaultId)) throw new Error("Simulated PayPal: unknown vault id");
+      const orderId = `SIM-ORDER-${randomUUID().slice(0, 8).toUpperCase()}`;
+      const authorizationId = `SIM-AUTH-${randomUUID().slice(0, 8).toUpperCase()}`;
+      this.auths.set(authorizationId, { amount: Number(a.amount), currency: a.currency, status: "CREATED" });
+      return { orderId, authorizationId, amount: a.amount, currency: a.currency, status: "CREATED" };
+    });
+  }
+
   async verifyWebhook() {
     return false; // never trust webhooks in simulated mode
   }

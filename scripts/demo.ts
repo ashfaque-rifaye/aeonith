@@ -185,8 +185,36 @@ async function main() {
   const ip = await proveAndPay(cb);
   check(ip.r.status === "settled", `delivery photo proven; ${ip.r.settlement.captures.length} captures, payout ${usd(ip.r.settlement.payout.amountCents)}`);
 
-  // 8. Integrity
-  console.log("\n8. Integrity");
+  // 8. Autopilot: sensor files + funds the job on the vaulted PayPal wallet, Voice Agent approves, recruiting call
+  console.log("\n8. Autopilot: the leak sensor files the job itself (PayPal Vault, merchant-initiated hold)");
+  try {
+    const ap = await api("/api/autopilot", { buyerName: "Ana R.", zip: "78704", capDollars: 450, categories: ["plumbing"] });
+    if (health.paypal === "simulated") await fetch(`${BASE}/paypal/vault-return?approval_token_id=${ap.autopilot.setupTokenId}`, { redirect: "manual" });
+    else {
+      console.log(`   → Approve saving PayPal as the sandbox buyer: ${ap.approveUrl}`);
+      for (let i = 0; i < 120; i++) { await sleep(5000); if ((await api("/api/autopilot")).find((a: Json) => a.id === ap.autopilot.id)?.status === "active") break; }
+    }
+    const job = await api(`/api/autopilot/${ap.autopilot.id}/sensor`, { device: "Leak sensor", location: "Utility closet water heater", reading: "Water detected on the floor" });
+    check(job.buyers[0].authorizedCents === 45000 && job.status === "awarded", `vaulted hold ${usd(job.buyers[0].authorizedCents)} placed with no redirect; ${job.award?.providerName} won at ${usd(job.award?.priceCents)}`);
+    const book = await api(`/api/requests/${job.id}/voice`, { intent: "book", transcript: "Approve, book them.", method: "voice" });
+    check(book.consent.approved && book.request.bookedAt, `booked on the Voice Agent call (consent sha256 ${book.consent.sha256.slice(0, 12)}…)`);
+    const pp = await proveAndPay(job.id);
+    check(pp.r.status === "settled", `proof → captured ${usd(pp.r.settlement.captures[0].amountCents)}, payout ${usd(pp.r.settlement.payout.amountCents)}`);
+  } catch (e) {
+    console.log(`   – skipped: ${(e as Error).message.slice(0, 160)} (enable "Save payment methods" on the PayPal sandbox app for Vault)`);
+  }
+
+  // 9. Recruiting call: the agent phones offline pros about Maria's funded water heater? (kept fresh) → use a new job
+  console.log("\n9. Recruiting: the agent phones local pros who aren't on Aeonith yet");
+  const rj = await solo(health.paypal, { title: "Kitchen sink drain backing up", category: "plumbing", description: "Slow drain turned into a full backup. Travis Heights, Austin TX 78704.", licensed: true, minWarrantyMonths: 0, buyerName: "Leo M.", limitDollars: 380, completeInDays: 3 });
+  await api(`/api/requests/${rj}/open-bidding`, {});
+  const calls = await api(`/api/requests/${rj}/recruit`, {});
+  check(calls.some((c: Json) => c.outcome.startsWith("Joined")), `${calls.length} calls: ${calls.map((c: Json) => `${c.party} → ${c.outcome}`).join("; ")}`);
+  const rc = await compete(rj);
+  check(!!rc.r.award, `${rc.r.commitments.length} sealed bids incl. recruited pros; winner ${rc.r.award?.providerName} at ${usd(rc.r.award?.priceCents)}`);
+
+  // 10. Integrity
+  console.log("\n10. Integrity");
   const audit = await api("/api/audit");
   check(audit.verify.ok, `audit chain intact (${audit.verify.length} signed events)`);
   const signals = await api("/protocol/v1/requests");

@@ -29,6 +29,12 @@ AI shopping agents could help, but a 2026 study showed that when an agent chats 
 
 **Together mode:** neighbours who need the same job join with their own holds. A provider's single trip makes the per-home price lower, everyone pays the same price, anyone below it is released, and a **best-of guarantee** means you never pay more than a solo quote you already have.
 
+**Agentic, on PayPal rails:**
+- **Autopilot (PayPal Vault):** a leak sensor files the job and Aeonith places a hold on the buyer's **vaulted PayPal** (Orders v2 AUTHORIZE with `vault_id`, merchant-initiated, capped by the budget they approved). Pros bid before the buyer wakes up.
+- **Voice Agent:** the agent calls the buyer at the two money moments, reading real PayPal numbers ("PayPal is holding $450… say *approve*"). The spoken answer is the human approval the policy gate needs before capture, fingerprinted into the audit chain.
+- **Live Proof:** a camera session with a code that exists only once the session starts and expires in 2 minutes; NVIDIA vision reads the handwritten code and checks the work.
+- **Recruiting calls:** the agent phones offline pros about the already-funded job; winners are paid by **Payouts to email** without needing a PayPal account first.
+
 **Beyond services: item pools.** The same loop works for goods:
 - **Car pool:** five buyers want the same model and trim from one dealership. Each holds only a **$500 refundable deposit**, while their private max price decides whether they're in. Dealer agents seal per-car bids, and the winner gets 4 committed buyers at **$31,980/car**. At delivery (a VIN photo with the one-time code) the deposits are captured and applied, and the balance is paid at the sealed price.
 - **Bulk order:** eight parents buy the same Chromebook at **$267** against ~$349 retail.
@@ -44,7 +50,8 @@ The eight demo scenarios move about $4,976 through 18 captures and 5 payouts, wo
 
 ### How we built it
 - **PayPal (sandbox):**
-  - Orders v2 `AUTHORIZE`
+  - Orders v2 `AUTHORIZE`, plus **merchant-initiated `AUTHORIZE` on a vaulted wallet** (Autopilot)
+  - **Vault v3** setup tokens and payment tokens
   - Payments v2: partial capture with `final_capture`, void, **reauthorize** after the 3-day honor period, refund
   - **Payouts** to the provider
   - Webhooks with `verify-webhook-signature`
@@ -57,7 +64,7 @@ The eight demo scenarios move about $4,976 through 18 captures and 5 payouts, wo
   - a **hash-chained, tamper-evident audit log**
   - a Sybil check for duplicate provider identities
 - **Experience:** a real-time **three.js** 3D claw that *holds your card* and follows the job (grips when held, sparks during bidding, scans during proof, drops the card to the pro on payment), plus **GSAP** motion, **Bryntum Scheduler** for booked jobs, and **AG Grid Enterprise** for the audit log (filters, row grouping), AI-usage grid and the sealed-offer comparison on every job.
-- **Stack:** Node 22, TypeScript, Express 5, Zod 4. 16 automated tests cover clearing, commit–reveal, the policy gate, the audit chain, proof, reauthorization, and the full solo, group and car-pool (deposit) flows.
+- **Stack:** Node 22, TypeScript, Express 5, Zod 4. 18 automated tests cover clearing, commit–reveal, the policy gate, the audit chain, proof, reauthorization, the full solo, group and car-pool (deposit) flows, and Autopilot → Voice Agent → Live Proof → voice release, including holds blocked outside the Autopilot budget or scope.
 
 ### Challenges
 - Making the money path impossible for an AI to bend: seller text never reaches payment code; only schema-checked offers do, and PayPal itself refuses captures above the hold.
@@ -73,7 +80,8 @@ The eight demo scenarios move about $4,976 through 18 captures and 5 payouts, wo
 Authorization holds are an underrated trust primitive: hold, partial capture, void and reauthorize let you build fair marketplaces without anyone ever sending a deposit to a stranger.
 
 ### What's next
-- Real provider onboarding through PayPal's multiparty/platform flows.
+- Real phone calls (the Voice Agent's script and consent logic are ready; a telephony provider is the next step).
+- Real provider onboarding through PayPal's multiparty/platform flows (Partner Referrals needs partner approval).
 - Licence verification against state boards.
 - Venmo as a funding option.
 - A "Make it a group job" button inside PayPal or Venmo.

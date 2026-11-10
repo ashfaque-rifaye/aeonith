@@ -16,5 +16,11 @@ export interface PaymentRail {
   reauthorize(authorizationId: string, requestId: string): Promise<{ id: string; status: string }>;
   refundCapture(captureId: string, amount: string, currency: string, requestId: string): Promise<{ id: string; status: string }>;
   createPayout(args: { receiver: string; amount: string; currency: string; note: string; senderBatchId: string }): Promise<{ batchId: string; status: string }>;
+  /** Vault v3: start saving the buyer's PayPal for merchant-initiated holds (Autopilot). Buyer approves once at PayPal. */
+  createVaultSetupToken(args: { description: string; returnUrl: string; cancelUrl: string; requestId: string }): Promise<{ id: string; approveUrl: string }>;
+  /** Vault v3: exchange the approved setup token for a reusable payment token (vault id). */
+  createPaymentToken(setupTokenId: string, requestId: string): Promise<{ vaultId: string; customerId: string }>;
+  /** Orders v2 AUTHORIZE paid with a vaulted PayPal wallet: places a hold without the buyer present. */
+  authorizeWithVault(args: { vaultId: string; amount: string; currency: string; description: string; customId: string; requestId: string }): Promise<{ orderId: string; authorizationId: string; amount: string; currency: string; status: string }>;
   verifyWebhook(headers: Record<string, string | string[] | undefined>, event: unknown): Promise<boolean>;
 }

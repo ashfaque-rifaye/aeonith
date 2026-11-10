@@ -132,6 +132,61 @@ app.get("/paypal/return", wrap(async (req, res) => {
 }));
 app.get("/paypal/cancel", (req, res) => res.redirect(`/?cancelled=1`));
 
+// PayPal Vault approval return (Autopilot). PayPal sends the setup token as approval_token_id.
+app.get("/paypal/vault-return", wrap(async (req, res) => {
+  const token = String(req.query.approval_token_id ?? req.query.token ?? "");
+  if (!/^[A-Z0-9-]{5,40}$/i.test(token)) throw new HttpError(400, "Bad token");
+  await app$.completeAutopilot(token);
+  res.redirect("/?vaulted=1#/autopilot");
+}));
+app.get("/sim/vault", (req, res) => {
+  if (paypal.mode !== "simulated") return res.status(404).end();
+  const token = String(req.query.token ?? "").replace(/[^A-Z0-9-]/gi, "");
+  res.type("html").send(`<!doctype html><meta name=viewport content="width=device-width,initial-scale=1"><title>Simulated PayPal</title>
+  <body style="font-family:system-ui;max-width:420px;margin:60px auto;padding:16px">
+  <p style="background:#fff3cd;padding:8px;border-radius:6px">SIMULATED PayPal (no sandbox credentials configured)</p>
+  <h2>Save PayPal for Aeonith Autopilot</h2><p>Aeonith may place holds (not charges) within your budget when a sensor reports an emergency.</p>
+  <p><a href="/paypal/vault-return?approval_token_id=${token}" style="background:#0070ba;color:#fff;padding:10px 16px;border-radius:20px;text-decoration:none">Agree and save</a></p></body>`);
+});
+
+// ---------- Autopilot (Vault + merchant-initiated holds) ----------
+app.get("/api/autopilot", (_req, res) => res.json([...store.autopilots.values()]));
+app.post("/api/autopilot", wrap(async (req, res) => {
+  const body = z.object({
+    buyerName: z.string().max(60).default("You"),
+    zip: z.string().max(10).default(""),
+    capDollars: z.number().positive().max(100000),
+    categories: z.array(z.enum(["plumbing", "electrical", "hvac"])).min(1).max(3).default(["plumbing"]),
+  }).parse(req.body);
+  res.status(201).json(await app$.startAutopilot(body));
+}));
+app.post("/api/autopilot/:id/revoke", wrap(async (req, res) => res.json(app$.revokeAutopilot(String(req.params.id)))));
+app.post("/api/autopilot/:id/sensor", wrap(async (req, res) => {
+  const body = z.object({ device: z.string().min(2).max(60), location: z.string().min(2).max(60), reading: z.string().min(2).max(80) }).parse(req.body);
+  res.status(201).json(await app$.sensorAlert({ autopilotId: String(req.params.id), ...body }));
+}));
+
+// ---------- Voice Agent ----------
+app.get("/api/requests/:id/call", (req, res) => {
+  const intent = req.query.intent === "release" ? "release" : "book";
+  res.json(app$.callScript(req.params.id, intent));
+});
+app.post("/api/requests/:id/voice", wrap(async (req, res) => {
+  const body = z.object({ intent: z.enum(["book", "release"]), transcript: z.string().min(1).max(300), method: z.enum(["voice", "tap"]) }).parse(req.body);
+  res.json(await app$.voiceConsent(req.params.id, body));
+}));
+
+// ---------- Live Proof ----------
+app.post("/api/requests/:id/live/start", wrap(async (req, res) => res.json(app$.liveStart(req.params.id))));
+app.post("/api/requests/:id/live/frame", wrap(async (req, res) => {
+  const { imageBase64 } = z.object({ imageBase64: z.string().min(100).max(6_000_000) }).parse(req.body);
+  res.json(await app$.liveFrame(req.params.id, imageBase64));
+}));
+app.post("/api/requests/:id/live/finish", wrap(async (req, res) => res.json(app$.liveFinish(req.params.id))));
+
+// ---------- Recruiting calls ----------
+app.post("/api/requests/:id/recruit", wrap(async (req, res) => res.json(await app$.recruit(req.params.id))));
+
 // Simulated-mode approval screen (stands in for PayPal's page ONLY when no sandbox credentials are set).
 app.get("/sim/approve", (req, res) => {
   if (paypal.mode !== "simulated") return res.status(404).end();

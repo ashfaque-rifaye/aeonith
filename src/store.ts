@@ -2,12 +2,13 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { AuditLog, type AuditEntry } from "./core/audit.js";
-import type { BuyerHold, JobRequest, Requirements } from "./domain/types.js";
+import type { Autopilot, BuyerHold, JobRequest, Requirements } from "./domain/types.js";
 
 interface Persisted {
   requests: JobRequest[];
   audit: AuditEntry[];
   photoHashes: string[];
+  autopilots?: Autopilot[];
 }
 
 /** Small JSON-file store: enough for a demo, survives restarts, easy for judges to inspect. */
@@ -15,6 +16,7 @@ export class Store {
   requests = new Map<string, JobRequest>();
   audit = new AuditLog();
   photoHashes = new Set<string>();
+  autopilots = new Map<string, Autopilot>();
 
   constructor(private readonly file: string | null) {
     if (file && existsSync(file)) {
@@ -22,6 +24,7 @@ export class Store {
       for (const r of data.requests) this.requests.set(r.id, r);
       this.audit = new AuditLog(data.audit);
       this.photoHashes = new Set(data.photoHashes);
+      for (const a of data.autopilots ?? []) this.autopilots.set(a.id, a);
     }
   }
 
@@ -29,7 +32,7 @@ export class Store {
     if (!this.file) return;
     mkdirSync(dirname(this.file), { recursive: true });
     const tmp = `${this.file}.tmp`;
-    const data: Persisted = { requests: [...this.requests.values()], audit: this.audit.toJSON(), photoHashes: [...this.photoHashes] };
+    const data: Persisted = { requests: [...this.requests.values()], audit: this.audit.toJSON(), photoHashes: [...this.photoHashes], autopilots: [...this.autopilots.values()] };
     writeFileSync(tmp, JSON.stringify(data, null, 2));
     renameSync(tmp, this.file);
   }
@@ -39,6 +42,7 @@ export class Store {
     this.requests.clear();
     this.audit = new AuditLog();
     this.photoHashes.clear();
+    this.autopilots.clear();
     this.save();
   }
 

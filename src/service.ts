@@ -1,10 +1,12 @@
+import { createHash, randomUUID } from "node:crypto";
+import { offlineDirectory } from "./agents/directory.js";
 import { decideOffer } from "./agents/providers.js";
 import type { Agent } from "./ai/agent.js";
 import { clear, fmt, toCents } from "./core/clearing.js";
 import { commitmentHash, newSalt, verifyReveal } from "./core/commit.js";
 import { capturePerUnit, enforce, holdPerUnit, PolicyViolation } from "./core/policy.js";
 import { codeChecks, inspectImage, newChallengeCode, verdict } from "./core/proof.js";
-import type { BuyerHold, Commitment, JobRequest, Offer, Provider } from "./domain/types.js";
+import type { Autopilot, BuyerHold, CallLog, Commitment, Consent, JobRequest, Offer, Provider } from "./domain/types.js";
 import type { PaymentRail } from "./paypal/rail.js";
 import { demandSignal, OfferSchema } from "./protocol/schema.js";
 import { newBuyer, newRequest, type Store } from "./store.js";
@@ -283,6 +285,7 @@ export class Aeonith {
   issueChallenge(rid: unknown) {
     const r = this.req(rid);
     if (r.status !== "awarded") throw new HttpError(409, "Challenge is issued after the award");
+    if (r.autopilotId && !r.bookedAt) throw new HttpError(409, "Autopilot job: the buyer approves the booking on the Voice Agent call first");
     r.proof = { code: newChallengeCode(), issuedAt: new Date().toISOString(), checks: [] };
     this.log("engine", "proof.challenge_issued", { code: r.proof.code }, r.id);
     this.store.save();
@@ -355,7 +358,7 @@ export class Aeonith {
     }
     const capturedTotal = captures.reduce((s, c) => s + c.amountCents, 0);
     const fee = Math.round((capturedTotal * this.d.platformFeePct) / 100);
-    const provider = this.d.providers.find((p) => p.id === award.providerId);
+    const provider = this.d.providers.find((p) => p.id === award.providerId) ?? r.recruited?.find((p) => p.id === award.providerId);
     const receiver = provider?.payoutEmail ?? "";
     let payout: NonNullable<JobRequest["settlement"]>["payout"];
     if (capturedTotal > 0) {
@@ -409,6 +412,278 @@ export class Aeonith {
     b.status = "voided";
     b.note = reason;
     this.log("paypal", "hold.voided", { buyerId: b.id, authorizationId: b.authorizationId, reason }, r.id);
+  }
+
+
+  // =====================================================================================================
+  // Autopilot: a home sensor files AND funds the job on the buyer's vaulted PayPal (merchant-initiated).
+  // =====================================================================================================
+
+  async startAutopilot(input: { buyerName: string; zip: string; capDollars: number; categories: string[] }) {
+    const capCents = toCents(input.capDollars);
+    if (capCents <= 0 || capCents > this.d.maxAuthCents) throw new HttpError(400, `Autopilot budget must be between $1 and $${fmt(this.d.maxAuthCents)}`);
+    const a: Autopilot = {
+      id: `ap_${randomUUID().slice(0, 8)}`,
+      buyerName: input.buyerName.slice(0, 60) || "You",
+      zip: input.zip.slice(0, 10),
+      capCents,
+      categories: input.categories.length ? input.categories : ["plumbing"],
+      status: "pending",
+      createdAt: new Date().toISOString(),
+    };
+    const st = await this.d.paypal.createVaultSetupToken({
+      description: `Aeonith Autopilot: emergency jobs up to $${fmt(capCents)}, held not paid`,
+      returnUrl: `${this.d.appBaseUrl}/paypal/vault-return`,
+      cancelUrl: `${this.d.appBaseUrl}/paypal/cancel`,
+      requestId: `setup-${a.id}`,
+    });
+    a.setupTokenId = st.id;
+    this.store.autopilots.set(a.id, a);
+    this.log(`buyer:${a.id}`, "autopilot.requested", { cap: fmt(capCents), categories: a.categories, setupTokenId: st.id }, undefined);
+    this.store.save();
+    return { autopilot: a, approveUrl: st.approveUrl };
+  }
+
+  /** Buyer approved the vault at PayPal: exchange the setup token for a reusable payment token. */
+  async completeAutopilot(setupTokenId: string) {
+    const a = [...this.store.autopilots.values()].find((x) => x.setupTokenId === setupTokenId);
+    if (!a) throw new HttpError(404, "Unknown Autopilot approval");
+    if (a.status === "active") return a;
+    const pt = await this.d.paypal.createPaymentToken(setupTokenId, `pt-${a.id}`);
+    a.vaultId = pt.vaultId;
+    a.customerId = pt.customerId;
+    a.status = "active";
+    a.activatedAt = new Date().toISOString();
+    this.log("paypal", "vault.payment_token_created", { autopilotId: a.id, vaultId: pt.vaultId, customerId: pt.customerId }, undefined);
+    this.store.save();
+    return a;
+  }
+
+  revokeAutopilot(id: string) {
+    const a = this.store.autopilots.get(id);
+    if (!a) throw new HttpError(404, "Unknown Autopilot");
+    a.status = "revoked";
+    this.log(`buyer:${a.id}`, "autopilot.revoked", {}, undefined);
+    this.store.save();
+    return a;
+  }
+
+  /**
+   * A sensor reports a problem. Within the buyer's pre-approved budget, Aeonith files the job, places a PayPal hold on
+   * the vaulted wallet (no redirect, buyer asleep), and runs the sealed competition. Booking still waits for the buyer:
+   * the Voice Agent calls them to approve before any pro is dispatched.
+   */
+  async sensorAlert(input: { autopilotId: string; device: string; location: string; reading: string }) {
+    const a = this.store.autopilots.get(input.autopilotId);
+    if (!a || a.status !== "active") throw new HttpError(409, "Autopilot isn't active: approve it in PayPal first");
+    const plumbing = /leak|water|pipe|heater|flood/i.test(`${input.device} ${input.reading}`);
+    const category = plumbing ? "plumbing" : /furnace|hvac|temperature|thermostat/i.test(`${input.device} ${input.reading}`) ? "hvac" : "electrical";
+    const inDays = (d: number) => new Date(Date.now() + d * 86400_000).toISOString().slice(0, 10);
+    const r = newRequest({
+      mode: "solo",
+      title: plumbing ? `Water leak: ${input.location}` : `${input.device}: ${input.location}`,
+      category,
+      description: `Filed automatically by ${input.device} (${input.reading}) at ${input.location}. ZIP ${a.zip}. Emergency: stop the leak and repair.`,
+      zip: a.zip,
+      requirements: { licensed: true, minWarrantyMonths: 6, completeBy: inDays(2) },
+      closesInHours: 2,
+    });
+    r.autopilotId = a.id;
+    r.trigger = { device: input.device.slice(0, 60), location: input.location.slice(0, 60), reading: input.reading.slice(0, 80), at: new Date().toISOString() };
+    const b = newBuyer(a.buyerName, a.capCents, 1);
+    b.consentAt = a.activatedAt!; // the standing Autopilot approval is the consent for this hold
+    r.buyers.push(b);
+    const amountCents = holdPerUnit(r, b) * b.units;
+    // Gate first: a blocked alert must not leave a job behind.
+    this.gate({ kind: "HOLD", request: r, buyer: b, amountCents, maxAuthCents: this.d.maxAuthCents, autopilot: a }, r.id);
+    this.store.requests.set(r.id, r);
+    this.log(`device:${input.device}`, "sensor.alert", { location: r.trigger.location, reading: r.trigger.reading }, r.id);
+    this.log("engine", "request.created", { mode: "solo", title: r.title, by: "autopilot" }, r.id);
+    const auth = await this.d.paypal.authorizeWithVault({
+      vaultId: a.vaultId!,
+      amount: fmt(amountCents),
+      currency: this.d.currency,
+      description: `Aeonith Autopilot hold: ${r.title} (released unless the job is done)`,
+      customId: `${r.id}:${b.id}`,
+      requestId: `vauth-${r.id}-${b.id}`,
+    });
+    if (toCents(auth.amount) !== amountCents) {
+      await this.d.paypal.voidAuthorization(auth.authorizationId, `void-mismatch-${auth.authorizationId}`).catch(() => {});
+      throw new HttpError(409, "Vaulted hold amount mismatch: released");
+    }
+    b.status = "held";
+    b.orderId = auth.orderId;
+    b.authorizationId = auth.authorizationId;
+    b.authorizedCents = amountCents;
+    b.authorizedAt = new Date().toISOString();
+    r.status = "bidding";
+    this.log("paypal", "hold.authorized", { buyerId: b.id, orderId: auth.orderId, authorizationId: auth.authorizationId, amount: auth.amount, status: auth.status, via: "vault (merchant-initiated)" }, r.id);
+    this.store.save();
+    await this.runSimulatedProviders(r.id);
+    this.closeBidding(r.id);
+    await this.award(r.id);
+    return r;
+  }
+
+  // =====================================================================================================
+  // Voice Agent: the agent calls the buyer at the two money moments; consent is fingerprinted into the audit chain.
+  // =====================================================================================================
+
+  /** Deterministic call script: every number comes from PayPal state and the clearing result, never from the model. */
+  callScript(rid: unknown, intent: "book" | "release") {
+    const r = this.req(rid);
+    const b = r.buyers.find((x) => r.award?.buyersIn.includes(x.id)) ?? r.buyers[0];
+    const a = r.award;
+    if (!a) throw new HttpError(409, "No winner yet: nothing to call about");
+    const held = b?.authorizedCents ?? 0;
+    const charge = capturePerUnit(r, a.priceCents) * (b?.units ?? 1);
+    const name = (b?.name ?? "there").split(" ")[0];
+    const promises = r.reveals.find((v) => v.offer.providerId === a.providerId)?.offer.promises;
+    const lines: string[] = [];
+    if (intent === "book") {
+      lines.push(r.trigger
+        ? `Hi ${name}, it's your Aeonith agent. Your ${r.trigger.device.toLowerCase()} reported ${r.trigger.reading.toLowerCase()} at your ${r.trigger.location.toLowerCase()}.`
+        : `Hi ${name}, it's your Aeonith agent with the result for "${r.title}".`);
+      lines.push(`PayPal is holding $${fmt(held)} on your account. Nothing has been paid.`);
+      lines.push(`${r.commitments.length} pros sealed their bids. ${a.providerName} won at $${fmt(a.priceCents)}${promises ? `, licensed, with a ${promises.warrantyMonths}-month warranty` : ""}.`);
+      lines.push(`Say "approve" and I'll book them. You'll only be charged after photo proof.`);
+    } else {
+      lines.push(`Hi ${name}, it's your Aeonith agent. ${a.providerName} says the job is done.`);
+      lines.push(r.proof?.verdict === "pass" ? `The proof passed: the one-time code was visible and the work matches the job.` : `The proof needs your eyes: ${r.proof?.aiSummary ?? "please check the photo"}.`);
+      lines.push(`If you approve, PayPal captures $${fmt(charge)} from your $${fmt(held)} hold${held > charge ? ` and releases the other $${fmt(held - charge)}` : ""}.`);
+      lines.push(`Say "release payment" to pay ${a.providerName}, or "stop" to keep the money on hold.`);
+    }
+    return { intent, lines, providerName: a.providerName, heldCents: held, chargeCents: charge };
+  }
+
+  /** The buyer's answer on the call. Approval is decided by deterministic phrase matching, not by AI. */
+  async voiceConsent(rid: unknown, input: { intent: "book" | "release"; transcript: string; method: "voice" | "tap" }) {
+    const r = this.req(rid);
+    const transcript = input.transcript.trim().slice(0, 300);
+    const neg = /\b(no|stop|don'?t|cancel|wait|hold off|decline|reject)\b/i.test(transcript);
+    const pos = input.intent === "book" ? /\b(approve|approved|yes|book|go ahead|do it|confirm)\b/i.test(transcript) : /\b(release|approve|approved|yes|pay|go ahead|confirm)\b/i.test(transcript);
+    const approved = pos && !neg;
+    const at = new Date().toISOString();
+    const sha256 = createHash("sha256").update(`${r.id}|${input.intent}|${transcript}|${at}`).digest("hex");
+    const consent: Consent = { intent: input.intent, method: input.method, transcript, approved, at, sha256 };
+    const script = this.callScript(r.id, input.intent);
+    (r.calls ??= []).push({
+      id: `call_${randomUUID().slice(0, 6)}`, kind: "consent", at, party: r.buyers[0]?.name ?? "Buyer",
+      lines: [...script.lines.map((text) => ({ who: "agent" as const, text })), { who: "buyer", text: transcript }],
+      outcome: approved ? (input.intent === "book" ? "Booked" : "Payment released") : "Declined: nothing moved",
+    });
+    (r.consents ??= []).push(consent);
+    this.log("buyer", "consent.voice", { intent: input.intent, method: input.method, approved, sha256 }, r.id);
+    if (input.intent === "book") {
+      if (r.status !== "awarded") throw new HttpError(409, "Nothing to book right now");
+      if (approved) { r.bookedAt = at; this.store.save(); this.issueChallenge(r.id); }
+      else { this.store.save(); await this.releaseAll(r.id, "Buyer declined the booking on the call"); }
+      return { consent, request: this.req(r.id) };
+    }
+    if (r.status !== "proving") throw new HttpError(409, "Release is approved after proof is submitted");
+    if (!approved) { this.store.save(); return { consent, request: r }; }
+    if (r.proof?.verdict !== "pass") this.confirmDone(r.id);
+    const settled = await this.settle(r.id, "buyer");
+    return { consent, request: settled };
+  }
+
+  // =====================================================================================================
+  // Live Proof: the code exists only after the camera session starts and expires in two minutes.
+  // =====================================================================================================
+
+  liveStart(rid: unknown) {
+    const r = this.req(rid);
+    if (r.status !== "awarded") throw new HttpError(409, "Live Proof starts after the pro is booked");
+    if (r.autopilotId && !r.bookedAt) throw new HttpError(409, "Autopilot job: waiting for the buyer's booking approval");
+    const code = newChallengeCode();
+    const now = Date.now();
+    r.live = { code, startedAt: new Date(now).toISOString(), expiresAt: new Date(now + 120_000).toISOString(), frames: [] };
+    r.proof = { code, issuedAt: r.live.startedAt, checks: [] };
+    this.log("engine", "proof.live_started", { code, expiresAt: r.live.expiresAt }, r.id);
+    this.store.save();
+    return r.live;
+  }
+
+  async liveFrame(rid: unknown, imageBase64: string) {
+    const r = this.req(rid);
+    const live = r.live;
+    if (!live || live.finishedAt || r.status !== "awarded") throw new HttpError(409, "No live session running");
+    if (Date.now() > Date.parse(live.expiresAt)) throw new HttpError(409, "Live session expired: start a new one (new code)");
+    if (live.frames.length >= 8) throw new HttpError(429, "Frame limit reached for this session");
+    const buf = Buffer.from(imageBase64, "base64");
+    const facts = inspectImage(buf);
+    if (!["image/jpeg", "image/png", "image/webp"].includes(facts.mime)) throw new HttpError(400, "Frames must be JPEG, PNG or WebP");
+    const ai = await this.d.agent.checkCompletion({ jobTitle: r.title, jobDescription: r.description, code: live.code, note: "Live camera frame", imageBase64, mime: facts.mime });
+    const frame = { at: new Date().toISOString(), sha256: facts.sha256, codeVisible: ai.codeVisible, matchesJob: ai.matchesJob, summary: ai.summary };
+    live.frames.push(frame);
+    this.log(`provider:${r.award!.providerId}`, "proof.live_frame", { n: live.frames.length, codeVisible: ai.codeVisible, matchesJob: ai.matchesJob }, r.id);
+    this.store.save();
+    return { frame, done: ai.codeVisible === true && ai.matchesJob === true };
+  }
+
+  liveFinish(rid: unknown) {
+    const r = this.req(rid);
+    const live = r.live;
+    if (!live || r.status !== "awarded") throw new HttpError(409, "No live session running");
+    if (!live.frames.length) throw new HttpError(409, "No frames analysed yet");
+    const best = live.frames.find((f) => f.codeVisible === true && f.matchesJob === true) ?? live.frames[live.frames.length - 1];
+    const inWindow = Date.parse(best.at) <= Date.parse(live.expiresAt);
+    const checks = [
+      { name: "Live camera session", ok: true, detail: `Code revealed only when the session started; ${live.frames.length} frame${live.frames.length === 1 ? "" : "s"} analysed`, by: "code" as const },
+      { name: "Inside the 2-minute window", ok: inWindow, detail: inWindow ? `Frame at ${new Date(best.at).toISOString().slice(11, 19)} UTC, before ${new Date(live.expiresAt).toISOString().slice(11, 19)}` : "Frame arrived after the code expired", by: "code" as const },
+      { name: "One-time code visible", ok: best.codeVisible, detail: best.codeVisible === true ? `Read ${live.code} on camera` : best.codeVisible === false ? "Code not seen on camera" : "Not verified by AI: buyer checks", by: "ai" as const },
+      { name: "Work matches the job", ok: best.matchesJob, detail: best.summary, by: "ai" as const },
+    ];
+    live.finishedAt = new Date().toISOString();
+    for (const f of live.frames) this.store.photoHashes.add(f.sha256);
+    r.proof = { code: live.code, issuedAt: live.startedAt, submittedAt: live.finishedAt, photoSha256: best.sha256, note: "Live Proof session", checks, aiSummary: best.summary, verdict: verdict(checks) };
+    r.status = "proving";
+    this.log(`provider:${r.award!.providerId}`, "proof.submitted", { sha256: best.sha256, verdict: r.proof.verdict, live: true }, r.id);
+    this.store.save();
+    return r.proof;
+  }
+
+  // =====================================================================================================
+  // Recruiting calls: the agent phones offline pros about an already-funded job.
+  // =====================================================================================================
+
+  async recruit(rid: unknown) {
+    const r = this.req(rid);
+    if (!["bidding"].includes(r.status)) throw new HttpError(409, "Recruit while bidding is open");
+    const held = r.buyers.filter((b) => b.status === "held");
+    if (!held.length) throw new HttpError(409, "Only funded jobs are pitched to pros");
+    const heldTotal = held.reduce((s, b) => s + (b.authorizedCents ?? 0), 0);
+    const auth = held[0].authorizationId ?? "";
+    const pool = offlineDirectory(this.d.providers[0]?.payoutEmail ?? "").filter((p) => p.categories.includes(r.category) && !(r.recruited ?? []).some((x) => x.id === p.id));
+    if (!pool.length) throw new HttpError(409, "No offline pros in the directory for this trade");
+    const signal = demandSignal(r);
+    const out: CallLog[] = [];
+    for (const p of pool.slice(0, 2)) {
+      const offer = decideOffer(p, signal);
+      const lines: CallLog["lines"] = [
+        { who: "agent", text: `Hi, this is the Aeonith agent calling for a homeowner in ${r.zip || "your area"}. Do you have a minute for a paid ${r.category} job?` },
+        { who: "pro", text: "Sure, what is it?" },
+        { who: "agent", text: `"${r.title}". The money is already reserved: PayPal is holding $${fmt(heldTotal)} on the buyer's account (authorization ${auth.slice(0, 14)}). I can't tell you their limit.` },
+        { who: "agent", text: `You'd submit one sealed bid. If you win, you're paid by PayPal Payouts the moment photo proof passes: no invoices, no chasing, and you don't need a PayPal account first.` },
+      ];
+      const ok = !!offer && (!r.requirements.licensed || p.licensed);
+      lines.push(ok ? { who: "pro", text: `Sounds good. I can be there ${new Date(offer!.promises.startAt).toLocaleString("en-US", { timeZone: "America/Chicago", weekday: "long", hour: "numeric" })}. Send it over.` }
+        : { who: "pro", text: "Not licensed for that one, sorry." });
+      if (ok) {
+        lines.push({ who: "agent", text: `Done. I've texted your secure bid link to ${p.phone}. Your payout will go to the email you confirm there.` });
+        (r.recruited ??= []).push(p);
+        const salt = newSalt();
+        const pitch = await this.d.agent.providerPitch(p, signal, offer!);
+        this.providerVault.set(`${r.id}:${p.id}`, { offer: offer!, salt, pitch });
+        this.commit(r.id, { providerId: p.id, providerName: p.name, hash: commitmentHash(offer!, salt) });
+      }
+      const call: CallLog = { id: `call_${randomUUID().slice(0, 6)}`, kind: "recruit", at: new Date().toISOString(), party: p.name, phone: p.phone, lines, outcome: ok ? "Joined: sealed bid submitted" : "Declined" };
+      (r.calls ??= []).push(call);
+      out.push(call);
+      this.log("agent", "recruit.call", { pro: p.name, phone: p.phone, outcome: call.outcome }, r.id);
+    }
+    this.store.save();
+    return out;
   }
 
   private gate(action: Parameters<typeof enforce>[0], rid: string) {

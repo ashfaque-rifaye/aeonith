@@ -147,6 +147,62 @@ export class PayPalClient implements PaymentRail {
     return { batchId: res.batch_header.payout_batch_id, status: res.batch_header.batch_status };
   }
 
+  /** Vault v3 setup token for a PayPal wallet, merchant-initiated use (Autopilot). Needs "Save payment methods" on the app. */
+  async createVaultSetupToken(args: { description: string; returnUrl: string; cancelUrl: string; requestId: string }) {
+    const st = await this.call<{ id: string; links?: { rel: string; href: string }[] }>(
+      "POST",
+      "/v3/vault/setup-tokens",
+      {
+        payment_source: {
+          paypal: {
+            description: args.description.slice(0, 127),
+            usage_pattern: "IMMEDIATE",
+            usage_type: "MERCHANT",
+            customer_type: "CONSUMER",
+            permit_multiple_payment_tokens: false,
+            experience_context: {
+              return_url: args.returnUrl,
+              cancel_url: args.cancelUrl,
+              shipping_preference: "NO_SHIPPING",
+              vault_instruction: "ON_PAYER_APPROVAL",
+            },
+          },
+        },
+      },
+      args.requestId,
+    );
+    const approveUrl = st.links?.find((l) => l.rel === "approve")?.href;
+    if (!approveUrl) throw new Error(`PayPal setup token ${st.id} has no approval link`);
+    return { id: st.id, approveUrl };
+  }
+
+  async createPaymentToken(setupTokenId: string, requestId: string) {
+    const pt = await this.call<{ id: string; customer?: { id: string } }>(
+      "POST",
+      "/v3/vault/payment-tokens",
+      { payment_source: { token: { id: setupTokenId, type: "SETUP_TOKEN" } } },
+      requestId,
+    );
+    return { vaultId: pt.id, customerId: pt.customer?.id ?? "" };
+  }
+
+  /** Merchant-initiated hold on a vaulted wallet: the order is created and authorized in one call, no redirect. */
+  async authorizeWithVault(args: { vaultId: string; amount: string; currency: string; description: string; customId: string; requestId: string }) {
+    const order = await this.call<PayPalOrder>(
+      "POST",
+      "/v2/checkout/orders",
+      {
+        intent: "AUTHORIZE",
+        purchase_units: [{ custom_id: args.customId, description: args.description.slice(0, 127), amount: { currency_code: args.currency, value: args.amount } }],
+        payment_source: { paypal: { vault_id: args.vaultId } },
+      },
+      args.requestId,
+    );
+    const auth = order.purchase_units?.[0]?.payments?.authorizations?.[0];
+    if (!auth) throw new Error(`PayPal vaulted order ${order.id} returned no authorization (status ${order.status})`);
+    return { orderId: order.id, authorizationId: auth.id, amount: auth.amount.value, currency: auth.amount.currency_code, status: auth.status };
+  }
+
   /** Verify a webhook really came from PayPal. Never trust an unverified event. */
   async verifyWebhook(headers: Record<string, string | string[] | undefined>, event: unknown): Promise<boolean> {
     if (!this.cfg.PAYPAL_WEBHOOK_ID) return false;

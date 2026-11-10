@@ -65,7 +65,9 @@ The same safety rules apply to every one:
 | Stay in sync | **Webhooks** with signature verification | Voids or disputes at PayPal update Aeonith's state |
 | Never double-charge | **`PayPal-Request-Id`** idempotency on every money call | Retries are safe |
 | Balance on big tickets *(next)* | **Pay Later / Pay Monthly** at handover | Car and solar balances are financed inside PayPal |
-| Repeat buyers *(next)* | **Vault** | One-tap holds for the next pool |
+| Autopilot *(built)* | **Vault v3** setup + payment tokens, then **Orders v2 AUTHORIZE with `vault_id`** (merchant-initiated) | A sensor files and funds an emergency job while the buyer sleeps, within a budget they approved once. Booking still waits for their "approve" on the Voice Agent call |
+| Consent *(built)* | Voice Agent call before **capture** | The buyer's spoken "release payment" is the human approval the policy gate requires; it's fingerprinted into the audit chain |
+| Pay pros you just met *(built)* | **Payouts to email** | Recruited pros are paid without a PayPal account in advance; they claim the payout |
 | Sellers as merchants *(production)* | **Multiparty / PayPal Complete Payments** onboarding plus a platform (partner) fee | Each pro or dealer becomes a PayPal merchant, and Aeonith takes its fee on the same capture |
 
 ## 3. How PayPal earns from this system
@@ -80,7 +82,9 @@ PayPal earns on **every dollar Aeonith moves**, and the network brings PayPal ne
    - On the seller side, every pro, dealer and retailer is onboarded as a PayPal merchant to get paid.
 5. **More money stays in PayPal.** Payouts land in the seller's PayPal balance. From there it can be spent, transferred instantly (a fee product) or used for their own supply purchases.
 6. **Fewer disputes and lower loss rates.** Funds are guaranteed before work starts and released only on proof, with an audit trail for every step. That means fewer chargebacks and "work never done" claims, which lowers PayPal's own losses on services, a high-dispute category.
-7. **A rail for agentic commerce.** The Offer Protocol (HTTP + MCP) gives any AI agent a safe way to spend:
+7. **Vaulted, merchant-initiated volume.** Autopilot turns a one-time Vault approval into recurring holds and captures, the stickiest kind of PayPal volume, because the buyer's emergency budget lives in PayPal.
+8. **Payouts as acquisition.** Recruited pros are paid by Payouts to their email before they have a PayPal account; claiming the money brings them into PayPal.
+9. **A rail for agentic commerce.** The Offer Protocol (HTTP + MCP) gives any AI agent a safe way to spend:
    - an authorization the agent can never exceed (policy gate plus PayPal's own limit)
    - capture only on proof
    - every step logged
