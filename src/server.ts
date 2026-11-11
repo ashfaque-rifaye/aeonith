@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { Channel3 } from "./catalog/channel3.js";
 import { fileURLToPath } from "node:url";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
@@ -24,6 +25,7 @@ const agent = new Agent(
   cfg.NVIDIA_API_KEY ? { client: new NvidiaClient(cfg.NVIDIA_API_KEY, meter), textModel: cfg.NVIDIA_TEXT_MODEL, visionModel: cfg.NVIDIA_VISION_MODEL } : null,
 );
 const store = new Store(cfg.DATA_FILE);
+const catalog = new Channel3(cfg.CHANNEL3_API_KEY);
 seedDemo(store);
 const app$ = new Aeonith({
   store,
@@ -75,8 +77,19 @@ app.get("/api/health", (_req, res) => {
   });
 });
 app.get("/api/public-config", (_req, res) => {
-  res.json({ paypalMode: paypal.mode, currency: cfg.CURRENCY, feePct: cfg.PLATFORM_FEE_PCT, agGridLicenseKey: cfg.AG_GRID_LICENSE_KEY });
+  // PayPal client ID is public by design (it loads the PayPal JS SDK); the secret never leaves the server.
+  res.json({ paypalMode: paypal.mode, paypalClientId: paypal.mode === "sandbox" ? cfg.PAYPAL_CLIENT_ID : "", currency: cfg.CURRENCY, feePct: cfg.PLATFORM_FEE_PCT, agGridLicenseKey: cfg.AG_GRID_LICENSE_KEY, channel3: catalog.enabled });
 });
+
+// ---------- the agent's follow-up questions + real product catalog (Channel3) ----------
+app.post("/api/intake/clarify", wrap(async (req, res) => {
+  const { text, draft } = z.object({ text: z.string().min(3).max(1500), draft: z.any() }).parse(req.body);
+  res.json(await agent.clarify(text, draft));
+}));
+app.get("/api/catalog/search", wrap(async (req, res) => {
+  const q = z.string().min(2).max(200).parse(String(req.query.q ?? ""));
+  res.json({ source: "channel3", products: await catalog.search(q, Number(req.query.limit ?? 6)) });
+}));
 // AI usage and NVIDIA credit meter (no prompts or outputs are stored, only counts, models and timings).
 app.get("/api/ai/usage", (_req, res) => res.json({ provider: agent.provider, label: agent.label, ...meter.summary() }));
 
@@ -104,6 +117,12 @@ app.post("/api/requests", wrap(async (req, res) => {
       limitDollars: z.number().positive().max(100000),
       units: z.number().int().min(1).max(20).default(1),
       depositDollars: z.number().positive().max(100000).optional(),
+      flow: z.enum(["quotes", "funded"]).optional(),
+      itemId: z.string().max(40).optional(),
+      catalog: z.object({
+        seller: z.string().max(80),
+        items: z.array(z.object({ id: z.string().max(40), name: z.string().max(90), msrpCents: z.number().int().positive().max(50_000_000), image: z.string().max(500).optional(), source: z.string().max(40).optional(), url: z.string().max(500).optional() })).min(1).max(12),
+      }).optional(),
     })
     .parse(req.body);
   res.status(201).json(await app$.createRequest(body));
@@ -111,7 +130,7 @@ app.post("/api/requests", wrap(async (req, res) => {
 
 app.post("/api/requests/:id/join", wrap(async (req, res) => {
   const body = z
-    .object({ name: z.string().max(60), limitDollars: z.number().positive().max(100000), units: z.number().int().min(1).max(5).default(1), soloBestDollars: z.number().positive().optional() })
+    .object({ name: z.string().max(60), limitDollars: z.number().positive().max(100000), units: z.number().int().min(1).max(5).default(1), soloBestDollars: z.number().positive().optional(), itemId: z.string().max(40).optional() })
     .parse(req.body);
   res.status(201).json(app$.join(req.params.id, body));
 }));
@@ -122,6 +141,14 @@ app.post("/api/requests/:id/buyers/:bid/hold", wrap(async (req, res) => {
 app.post("/api/requests/:id/buyers/:bid/cancel", wrap(async (req, res) => {
   await app$.cancelHold(req.params.id, req.params.bid);
   res.json({ ok: true });
+}));
+
+// PayPal JS SDK popup: the buyer approved the order in PayPal's window; authorize it server-side (same checks).
+app.post("/api/paypal/orders/:orderId/approved", wrap(async (req, res) => {
+  const orderId = String(req.params.orderId);
+  if (!/^[A-Z0-9-]{5,40}$/i.test(orderId)) throw new HttpError(400, "Bad order id");
+  const { request, buyer } = await app$.completeHold(orderId);
+  res.json({ requestId: request.id, buyerId: buyer.id, status: buyer.status, authorizationId: buyer.authorizationId });
 }));
 
 app.get("/paypal/return", wrap(async (req, res) => {
@@ -168,11 +195,11 @@ app.post("/api/autopilot/:id/sensor", wrap(async (req, res) => {
 
 // ---------- Voice Agent ----------
 app.get("/api/requests/:id/call", (req, res) => {
-  const intent = req.query.intent === "release" ? "release" : "book";
+  const intent = req.query.intent === "release" ? "release" : req.query.intent === "overcharge" ? "overcharge" : "book";
   res.json(app$.callScript(req.params.id, intent));
 });
 app.post("/api/requests/:id/voice", wrap(async (req, res) => {
-  const body = z.object({ intent: z.enum(["book", "release"]), transcript: z.string().min(1).max(300), method: z.enum(["voice", "tap"]) }).parse(req.body);
+  const body = z.object({ intent: z.enum(["book", "release", "overcharge"]), transcript: z.string().min(1).max(300), method: z.enum(["voice", "tap"]) }).parse(req.body);
   res.json(await app$.voiceConsent(req.params.id, body));
 }));
 
@@ -183,6 +210,12 @@ app.post("/api/requests/:id/live/frame", wrap(async (req, res) => {
   res.json(await app$.liveFrame(req.params.id, imageBase64));
 }));
 app.post("/api/requests/:id/live/finish", wrap(async (req, res) => res.json(app$.liveFinish(req.params.id))));
+
+// ---------- Payment request (pro) and direct release (buyer) ----------
+app.post("/api/requests/:id/payment-request", wrap(async (req, res) => {
+  const body = z.object({ amountDollars: z.number().positive().max(100000), note: z.string().max(200).default("") }).parse(req.body);
+  res.json(app$.requestPayment(req.params.id, body));
+}));
 
 // ---------- Recruiting calls ----------
 app.post("/api/requests/:id/recruit", wrap(async (req, res) => res.json(await app$.recruit(req.params.id))));

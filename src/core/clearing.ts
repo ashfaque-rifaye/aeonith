@@ -1,4 +1,4 @@
-import type { Award, BuyerHold, Cents, Offer, Requirements } from "../domain/types.js";
+import type { Award, BuyerHold, CatalogItem, Cents, Offer, Requirements } from "../domain/types.js";
 
 /**
  * Deterministic clearing. No AI here.
@@ -29,6 +29,61 @@ export function meetsRequirements(offer: Offer, req: Requirements): string | nul
   if (!(offer.priceCents > 0) || !Number.isInteger(offer.priceCents)) return "invalid price";
   if (!(offer.minUnits >= 1) || !Number.isInteger(offer.minUnits)) return "invalid minimum units";
   return null;
+}
+
+/** A buyer's price under a fleet discount: their own model's MSRP minus the sealed discount, whole dollars. */
+export function discounted(msrpCents: Cents, bps: number): Cents {
+  return Math.round((msrpCents * (10000 - bps)) / 10000 / 100) * 100;
+}
+
+/**
+ * Catalog pools (several models from one seller): each offer is one sealed discount off MSRP for the whole group.
+ * A buyer is in if their own model's discounted price is within their private max. Pick the offer with the most
+ * total saving below buyers' limits; ties as above. Same rules otherwise: limits decide only whether you're in.
+ */
+export function clearCatalog(buyers: BuyerHold[], items: CatalogItem[], candidates: CandidateOffer[], req: Requirements): Award | null {
+  const live = buyers.filter((b) => b.status === "held");
+  const msrp = (b: BuyerHold) => items.find((i) => i.id === b.itemId)?.msrpCents ?? 0;
+  const table: Award["table"] = [];
+  let best: { c: CandidateOffer; inIds: string[]; units: number; surplus: Cents; prices: Record<string, Cents> } | null = null;
+  for (const c of candidates) {
+    const bps = c.offer.discountBps ?? 0;
+    const row = { providerId: c.offer.providerId, providerName: c.providerName, priceCents: c.offer.priceCents, minUnits: c.offer.minUnits, eligibleUnits: 0, feasible: false, note: "", surplusCents: 0 };
+    const fail = meetsRequirements(c.offer, req);
+    if (fail) { row.note = `Filtered: ${fail}`; table.push(row); continue; }
+    const prices: Record<string, Cents> = {};
+    const inBuyers = live.filter((b) => { const p = discounted(msrp(b), bps); prices[b.id] = p; return msrp(b) > 0 && p <= b.limitCents; });
+    const units = inBuyers.reduce((s, b) => s + b.units, 0);
+    const surplus = inBuyers.reduce((s, b) => s + (b.limitCents - prices[b.id]) * b.units, 0);
+    row.eligibleUnits = units;
+    row.surplusCents = surplus;
+    row.feasible = units >= c.offer.minUnits && units > 0;
+    row.note = row.feasible ? `Feasible: ${(bps / 100).toFixed(1)}% off every model` : `Needs ${c.offer.minUnits} buyers, only ${units} fit their max at ${(bps / 100).toFixed(1)}% off`;
+    table.push(row);
+    if (!row.feasible) continue;
+    const cand = { c, inIds: inBuyers.map((b) => b.id), units, surplus, prices };
+    if (!best || better(cand, best)) best = cand;
+  }
+  if (!best) return null;
+  const bps = best.c.offer.discountBps ?? 0;
+  const unitPrices = Object.fromEntries(best.inIds.map((id) => [id, best!.prices[id]]));
+  const avg = Math.round(best.inIds.reduce((s, id) => s + unitPrices[id], 0) / best.inIds.length);
+  const winnerRow = table.find((r) => r.providerId === best!.c.offer.providerId);
+  if (winnerRow) winnerRow.note = "Winner";
+  const msrpSaving = best.inIds.reduce((s, id) => { const b = live.find((x) => x.id === id)!; return s + (msrp(b) - unitPrices[id]) * b.units; }, 0);
+  return {
+    providerId: best.c.offer.providerId,
+    providerName: best.c.providerName,
+    priceCents: avg,
+    discountBps: bps,
+    unitPrices,
+    buyersIn: best.inIds,
+    buyersOut: buyers.filter((b) => !best!.inIds.includes(b.id)).map((b) => ({ buyerId: b.id, reason: b.status !== "held" ? "No active PayPal hold" : `Max $${fmt(b.limitCents)} is below $${fmt(best!.prices[b.id] ?? 0)} for their model: released, not charged` })),
+    unitsServed: best.units,
+    buyerSavingCents: best.surplus,
+    reason: `${best.c.providerName} wins with a sealed fleet discount of ${(bps / 100).toFixed(1)}% off MSRP on every model: ${best.units} buyers save $${fmt(msrpSaving)} off sticker in total, each at their own model's price.`,
+    table,
+  };
 }
 
 export function clear(buyers: BuyerHold[], candidates: CandidateOffer[], req: Requirements): Award | null {

@@ -154,22 +154,28 @@ async function main() {
   const code = await api(`/api/requests/${cl}/challenge`, {});
   check(cc.r.status === "awarded" && code.code, `booked ${cc.r.award?.providerName} at ${usd(cc.r.award?.priceCents)}; proof code ${code.code}`);
 
-  // 6. Car pool from one dealership → $500 refundable deposits → deposit applied at delivery
-  console.log("\n6. Five buyers, one car model, one dealership (item pool, $500 refundable deposits)");
-  const car = await pool(health.paypal, {
-    title: "5 × 2026 compact hybrid SUV, same trim", category: "vehicles", licensed: true, minWarrantyMonths: 36, completeInDays: 10, depositDollars: 500,
-    description: "Same model, XLE-class trim, any colour. Out-the-door price per car incl. dealer fees, excl. tax/title. Austin TX 78704.",
-    buyers: [["Ava M.", 33000], ["Ben O.", 32500, 32100], ["Cara L.", 32800], ["Dan V.", 32000], ["Eli S.", 31500]],
-  });
+  // 6. Car pool: different Toyota models, one dealership, one sealed fleet discount; $500 refundable deposits
+  console.log("\n6. Six neighbours, four Toyota models, one dealership (fleet discount, $500 refundable deposits)");
+  const CARS = { seller: "Toyota dealers · Austin, TX", items: [
+    { id: "rav4-xle", name: "2026 RAV4 Hybrid XLE", msrpCents: 3650000 }, { id: "camry-se", name: "2026 Camry SE", msrpCents: 3220000 },
+    { id: "ccross-s", name: "2026 Corolla Cross Hybrid S", msrpCents: 3080000 }, { id: "ghl-xle", name: "2026 Grand Highlander XLE", msrpCents: 4890000 } ] };
+  const carBuyers: [string, string, number][] = [["Ava M.", "rav4-xle", 34000], ["Ben O.", "camry-se", 30000], ["Cara L.", "rav4-xle", 33800], ["Dan V.", "ccross-s", 29000], ["Eli S.", "ghl-xle", 43000], ["Fay K.", "camry-se", 30200]];
+  const completeByCar = new Date(Date.now() + 10 * 86400_000).toISOString().slice(0, 10);
+  const { request: carReq } = await api("/api/requests", { mode: "together", zip: "78704", units: 1, completeBy: completeByCar, title: "Toyota pool · one Austin dealership", category: "vehicles",
+    description: "Neighbours buying new Toyotas (different models) from one dealership. Out-the-door price per car incl. dealer fees, excl. tax/title. Austin TX 78704.",
+    licensed: true, minWarrantyMonths: 36, buyerName: carBuyers[0][0], limitDollars: carBuyers[0][2], depositDollars: 500, catalog: CARS, itemId: carBuyers[0][1] });
+  for (const [name, itemId, max] of carBuyers.slice(1)) await api(`/api/requests/${carReq.id}/join`, { name, limitDollars: max, units: 1, itemId });
+  for (const b of (await api(`/api/requests/${carReq.id}`)).buyers) await hold(carReq.id, b.id, health.paypal);
+  const car = carReq.id as string;
   const carHeld = (await api(`/api/requests/${car}`)).buyers.map((b: Json) => b.authorizedCents);
-  check(carHeld.every((c: number) => c === 50000), `each buyer holds only a $500 deposit (not a $33k car price)`);
+  check(carHeld.every((c: number) => c === 50000), `each buyer holds only a $500 deposit (not a $30k+ car price)`);
   const vc = await compete(car);
   const carFiltered = vc.r.award?.table.filter((t: Json) => !t.feasible).map((t: Json) => `${t.providerName}: ${t.note}`) ?? [];
-  check(vc.r.award?.providerName === "Capital Auto Group", `${vc.bids.length} dealer agents sealed bids; ${vc.r.award?.providerName} wins at ${usd(vc.r.award?.priceCents)}/car for ${vc.r.award?.unitsServed} cars`);
+  check(!!vc.r.award?.discountBps, `${vc.bids.length} dealer agents sealed bids; ${vc.r.award?.providerName} wins with ${(vc.r.award?.discountBps / 100).toFixed(1)}% off every model for ${vc.r.award?.unitsServed} cars`);
   check(carFiltered.length >= 1, `not chosen: ${carFiltered.join("; ")}`);
-  check(vc.r.buyers.find((b: Json) => b.name === "Eli S.")?.status === "voided", "Eli ($31,500 max) released at award, deposit never charged");
+  check(vc.r.buyers.find((b: Json) => b.name === "Eli S.")?.status === "voided", "Eli (Grand Highlander, $43,000 max) released at award, deposit never charged");
   const vp = await proveAndPay(car);
-  check(vp.r.settlement.captures.every((c: Json) => c.amountCents === 50000) && vp.r.settlement.balanceDueCents === vc.r.award.unitsServed * (vc.r.award.priceCents - 50000),
+  check(vp.r.settlement.captures.every((c: Json) => c.amountCents === 50000) && vp.r.settlement.balanceDueCents === Object.values(vc.r.award.unitPrices as Record<string, number>).reduce((t, p) => t + p - 50000, 0),
     `delivery proven (VIN + code): deposits captured, ${usd(vp.r.settlement.balanceDueCents)} balance due at handover; payout ${usd(vp.r.settlement.payout.amountCents)}`);
 
   // 7. Bulk items: one Chromebook order for eight parents

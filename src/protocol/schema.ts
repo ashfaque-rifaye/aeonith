@@ -19,6 +19,7 @@ export const OfferSchema = z.object({
   providerId: z.string().min(1).max(64),
   priceCents: z.number().int().positive().max(10_000_000),
   minUnits: z.number().int().min(1).max(1000),
+  discountBps: z.number().int().min(0).max(3000).optional(),
   promises: PromisesSchema,
 });
 
@@ -36,7 +37,8 @@ export const RevealBody = z.object({
 
 /** Build the provider-visible view. By construction there is no field here that can carry a buyer's limit. */
 export function demandSignal(r: JobRequest): DemandSignal {
-  const held = r.buyers.filter((b) => b.status === "held");
+  // Quote-first solo requests are visible to pros before the hold: the buyer books (and PayPal holds) the winner.
+  const held = r.flow === "quotes" ? r.buyers : r.buyers.filter((b) => b.status === "held");
   return {
     requestId: r.id,
     mode: r.mode,
@@ -50,5 +52,6 @@ export function demandSignal(r: JobRequest): DemandSignal {
     fundedRequests: held.length,
     closesAt: r.closesAt,
     status: r.status,
+    ...(r.catalog ? { catalog: { seller: r.catalog.seller, items: r.catalog.items.map((i) => ({ id: i.id, name: i.name, msrpCents: i.msrpCents, units: held.filter((b) => b.itemId === i.id).reduce((s, b) => s + b.units, 0) })) } } : {}),
   };
 }

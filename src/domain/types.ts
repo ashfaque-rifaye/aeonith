@@ -33,6 +33,18 @@ export interface BuyerHold {
   captureId?: string;
   capturedCents?: Cents;
   note?: string;
+  /** Catalog pools (e.g. several car models at one dealership): which item this buyer wants. */
+  itemId?: string;
+}
+
+/** One model/product a pool can buy from the same seller (MSRP from the seller's list or a catalog such as Channel3). */
+export interface CatalogItem {
+  id: string;
+  name: string;
+  msrpCents: Cents;
+  image?: string;
+  source?: string;
+  url?: string;
 }
 
 /** What a provider promises. Parsed into a strict schema; free text only lives in `pitch` (display-only). */
@@ -54,6 +66,8 @@ export interface Offer {
   priceCents: Cents;
   /** Minimum units for this price (1 for solo jobs). */
   minUnits: number;
+  /** Catalog pools: one sealed fleet discount (basis points off each buyer's MSRP), whatever model they chose. */
+  discountBps?: number;
   promises: Promises;
 }
 
@@ -84,6 +98,9 @@ export interface Award {
   buyerSavingCents: Cents;
   /** Plain-English, deterministic explanation of why this offer won. */
   reason: string;
+  /** Catalog pools: the sealed fleet discount and each buyer's own final price. */
+  discountBps?: number;
+  unitPrices?: Record<string, Cents>;
   /** Every offer and why it was or wasn't chosen. */
   table: { providerId: string; providerName: string; priceCents: Cents; minUnits: number; eligibleUnits: number; feasible: boolean; note: string; surplusCents: Cents }[];
 }
@@ -131,6 +148,17 @@ export interface JobRequest {
    * applied to the price, and the balance is paid to the seller at handover (financing / PayPal checkout).
    */
   depositPerUnitCents?: Cents;
+  /**
+   * "quotes": a solo request collects sealed quotes first; the buyer books the winner and PayPal holds exactly that
+   * price. "funded" (default): the hold comes first (group pools, Autopilot, API clients).
+   */
+  flow?: "quotes" | "funded";
+  /** Catalog pools: buyers pick different items from the same seller; sellers seal one discount for the whole group. */
+  catalog?: { seller: string; items: CatalogItem[] };
+  /** The pro's request to be paid after proof. Above the sealed price = overcharge, which the agent escalates. */
+  paymentRequest?: { amountCents: Cents; note: string; at: string; overchargeCents: Cents; resolution?: string };
+  /** Strikes against a provider on this job (e.g. tried to charge above the sealed price). */
+  flags?: { providerId: string; providerName: string; reason: string; at: string }[];
   createdAt: string;
   closesAt: string;
   status: RequestStatus;
@@ -158,7 +186,7 @@ export interface JobRequest {
 }
 
 export interface Consent {
-  intent: "book" | "release";
+  intent: "book" | "release" | "overcharge";
   method: "voice" | "tap";
   transcript: string;
   approved: boolean;
@@ -183,6 +211,9 @@ export interface LiveFrame {
   codeVisible: boolean | null;
   matchesJob: boolean | null;
   summary: string;
+  observations?: string[];
+  concerns?: string[];
+  confidence?: number;
 }
 
 export interface LiveSession {
@@ -232,6 +263,7 @@ export interface DemandSignal {
   fundedRequests: number;
   closesAt: string;
   status: RequestStatus;
+  catalog?: { seller: string; items: { id: string; name: string; msrpCents: Cents; units: number }[] };
 }
 
 export interface Provider {

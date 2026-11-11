@@ -120,7 +120,7 @@ test("demand signal never carries a buyer's limit", () => {
   assert.equal(demandSignal(r).fundedUnits, 1);
 });
 
-test("proof: code checks catch reuse and non-images; verdict needs AI-visible code + matching work", () => {
+test("proof: code checks catch reuse and non-images; verdict needs fresh capture + AI-confirmed work", () => {
   const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(200, 1)]);
   const facts = inspectImage(png);
   assert.equal(facts.mime, "image/png");
@@ -130,7 +130,7 @@ test("proof: code checks catch reuse and non-images; verdict needs AI-visible co
   assert.equal(reused.find((c) => c.name === "Never used before")!.ok, false);
   assert.equal(verdict(reused), "fail");
   assert.equal(verdict(fresh), "review", "without AI checks a human must decide");
-  const pass = [...fresh, { name: "One-time code visible", ok: true, detail: "", by: "ai" as const }, { name: "Work matches the job", ok: true, detail: "", by: "ai" as const }];
+  const pass = [...fresh, { name: "Work matches the job", ok: true, detail: "", by: "ai" as const }];
   assert.equal(verdict(pass), "pass");
   assert.match(newChallengeCode(), /^AEON-[A-HJ-NP-Z2-9]{4}$/);
   assert.equal(inspectImage(Buffer.from("not an image at all")).mime, "unknown");

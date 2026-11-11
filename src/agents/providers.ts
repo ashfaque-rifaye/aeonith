@@ -212,6 +212,21 @@ function businessHours(d: Date): Date {
 export function decideOffer(p: Provider, signal: DemandSignal, now = new Date()): Offer | null {
   if (!p.categories.includes(signal.category)) return null;
   if (signal.fundedUnits < 1) return null;
+  if (signal.catalog?.items.length) {
+    // Fleet pricing: the more cars the group buys, the deeper the discount the dealer can give on every model.
+    const units = signal.fundedUnits;
+    const bps = Math.max(150, Math.min(1400, Math.round(900 - p.marginPct * 120 + Math.min(units, 12) * 45)));
+    const ref = signal.catalog.items.reduce((a, b) => (b.units > a.units ? b : a), signal.catalog.items[0]);
+    const start = businessHours(new Date(now.getTime() + p.leadHours * 3600_000));
+    return {
+      requestId: signal.requestId,
+      providerId: p.id,
+      priceCents: Math.round((ref.msrpCents * (10000 - bps)) / 10000 / 100) * 100,
+      minUnits: Math.max(2, Math.ceil(units * 0.6)),
+      discountBps: bps,
+      promises: { licensed: p.licensed, licenseNo: p.licenseNo, warrantyMonths: p.warrantyMonths, startAt: start.toISOString(), endAt: new Date(start.getTime() + 8 * 3600_000).toISOString() },
+    };
+  }
   const minUnits = signal.mode === "solo" ? 1 : Math.max(1, Math.ceil(signal.fundedUnits * 0.8));
   const perHome = (p.baseCostCents + p.travelCostCents / minUnits) * (1 + p.marginPct / 100);
   const priceCents = Math.round(perHome / 100) * 100; // whole dollars

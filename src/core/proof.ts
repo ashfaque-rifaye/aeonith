@@ -77,8 +77,8 @@ export function codeChecks(facts: ImageFacts, issuedAt: string, seenHashes: Set<
 /** Code decides. Any hard fail → fail. Any AI "unsure" or code null with no visible code → review. */
 export function verdict(checks: ProofCheck[]): "pass" | "fail" | "review" {
   if (checks.some((c) => c.ok === false)) return "fail";
-  const codeVisible = checks.find((c) => c.name === "One-time code visible");
+  // Freshness is proven by code (live session stamp / photo checks); AI vision must confirm the work itself.
   const matches = checks.find((c) => c.name === "Work matches the job");
-  if (!codeVisible || !matches || codeVisible.ok !== true || matches.ok !== true) return "review";
+  if (!matches || matches.ok !== true) return "review";
   return "pass";
 }

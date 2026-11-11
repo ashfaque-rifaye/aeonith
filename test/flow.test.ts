@@ -215,3 +215,51 @@ test("Autopilot holds are blocked outside the approved budget and scope; recruit
   assert.ok(solo.commitments.some((c) => c.providerName === "Barton Creek Plumbing"));
   assert.ok(calls[0].lines.some((l) => /PayPal Payouts/.test(l.text)));
 });
+
+test("quote-first: sealed quotes before any hold; booking holds exactly the winning price; overcharge is blocked, flagged, and only the sealed price is captured", async () => {
+  const { store, svc } = setup();
+  const { request: r } = await svc.createRequest({ mode: "solo", flow: "quotes", title: "Fix leaking water heater", category: "plumbing", description: "Leak at the base", zip: "78704", licensed: true, minWarrantyMonths: 0, completeBy: "", buyerName: "Maria G.", limitDollars: 400, units: 1 });
+  assert.equal(r.flow, "quotes");
+  await svc.runSimulatedProviders(r.id);
+  assert.ok(r.commitments.length >= 3, "pros bid before any money is held");
+  assert.equal(r.buyers[0].status, "pending");
+  svc.closeBidding(r.id);
+  await svc.award(r.id);
+  assert.equal(r.status, "awarded");
+  assert.throws(() => svc.liveStart(r.id), /Book the winner/);
+  const order = await svc.startHold(r.id, r.buyers[0].id);
+  await svc.completeHold(order.id);
+  assert.equal(r.buyers[0].authorizedCents, r.award!.priceCents, "hold = sealed price, not the private budget");
+  assert.ok(r.bookedAt);
+  svc.liveStart(r.id);
+  r.live!.frames.push({ at: new Date().toISOString(), sha256: "a".repeat(64), codeVisible: null, matchesJob: true, summary: "Water heater installed, dry floor" });
+  const proof = svc.liveFinish(r.id);
+  assert.equal(proof.verdict, "pass");
+  svc.requestPayment(r.id, { amountDollars: r.award!.priceCents / 100 + 44, note: "extra" });
+  assert.equal(r.paymentRequest!.overchargeCents, 4400);
+  assert.ok(store.audit.entries.some((e) => e.action === "blocked" && e.requestId === r.id), "the oversized capture was refused by the gate");
+  const out = await svc.voiceConsent(r.id, { intent: "overcharge", transcript: "Pay the agreed price.", method: "tap" });
+  assert.equal(out.request.status, "settled");
+  assert.equal(r.buyers[0].capturedCents, r.award!.priceCents, "only the sealed price is captured");
+  assert.equal(r.flags?.length, 1, "provider flagged");
+});
+
+test("catalog pool: different models from one dealership, one sealed fleet discount, each buyer at their own model's price", async () => {
+  const { store, svc } = setup();
+  const catalog = { seller: "Toyota dealers", items: [{ id: "rav4", name: "RAV4 Hybrid", msrpCents: 3650000 }, { id: "camry", name: "Camry", msrpCents: 3220000 }, { id: "ghl", name: "Grand Highlander", msrpCents: 4890000 }] };
+  const { request: r } = await svc.createRequest({ mode: "together", title: "Toyota pool", category: "vehicles", description: "", zip: "78704", licensed: true, minWarrantyMonths: 36, completeBy: "", buyerName: "Ava", limitDollars: 34000, units: 1, depositDollars: 500, catalog, itemId: "rav4" });
+  svc.join(r.id, { name: "Ben", limitDollars: 30000, units: 1, itemId: "camry" });
+  svc.join(r.id, { name: "Cara", limitDollars: 33800, units: 1, itemId: "rav4" });
+  svc.join(r.id, { name: "Eli", limitDollars: 43000, units: 1, itemId: "ghl" });
+  await holdAll(svc, r.id, store);
+  assert.ok(r.buyers.every((b) => b.authorizedCents === 50000));
+  await svc.runSimulatedProviders(r.id);
+  svc.closeBidding(r.id);
+  await svc.award(r.id);
+  const a = r.award!;
+  assert.ok(a.discountBps && a.discountBps > 0);
+  const ava = r.buyers.find((b) => b.name === "Ava")!, ben = r.buyers.find((b) => b.name === "Ben")!, eli = r.buyers.find((b) => b.name === "Eli")!;
+  assert.ok(a.unitPrices![ava.id] > a.unitPrices![ben.id], "each model has its own price");
+  assert.ok(a.unitPrices![ava.id] < 3650000);
+  assert.equal(eli.status, "voided", "max below his model's discounted price → released, never charged");
+});

@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/fx.css" />
   <link rel="stylesheet" href="/ember.css" />
+  <link rel="stylesheet" href="/v6.css" />
   <script type="importmap">{ "imports": { "three": "/vendor/three/build/three.module.min.js" } }</script>
 </head>
 <body>
@@ -30,14 +31,15 @@
     <nav class="links" id="side-nav" aria-label="Main navigation"></nav>
     <div class="right">
       <div class="env-pills" id="env"></div>
-      <a class="pill-dark" href="#/new">Post a job</a>
+      <button class="pill-dark theme-btn" id="theme-btn" type="button" aria-label="Switch light or dark theme"></button>
+      <a class="pill-dark" href="#/new">Start a request</a>
     </div>
   </header>
 
   <div class="shell">
     <div class="main">
       <main id="view" tabindex="-1"></main>
-      <footer class="foot">sandbox only · provider agents simulated · not legal advice</footer>
+      <footer class="foot">PayPal sandbox · seller agents simulated · sample prices · not financial or legal advice</footer>
     </div>
   </div>
 
