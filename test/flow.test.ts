@@ -237,7 +237,7 @@ test("quote-first: sealed quotes before any hold; booking holds exactly the winn
   assert.equal(proof.verdict, "pass");
   svc.requestPayment(r.id, { amountDollars: r.award!.priceCents / 100 + 44, note: "extra" });
   assert.equal(r.paymentRequest!.overchargeCents, 4400);
-  assert.ok(store.audit.entries.some((e) => e.action === "blocked" && e.requestId === r.id), "the oversized capture was refused by the gate");
+  assert.ok(store.audit.all(r.id).some((e) => e.action === "blocked"), "the oversized capture was refused by the gate");
   const out = await svc.voiceConsent(r.id, { intent: "overcharge", transcript: "Pay the agreed price.", method: "tap" });
   assert.equal(out.request.status, "settled");
   assert.equal(r.buyers[0].capturedCents, r.award!.priceCents, "only the sealed price is captured");

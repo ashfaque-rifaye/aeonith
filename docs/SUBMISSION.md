@@ -6,39 +6,29 @@
 Aeonith
 
 ## Elevator pitch (≤ 200 chars)
-Name the job and your max price. Pros' AI agents compete with sealed bids. PayPal holds your money and pays only on photo proof. Alone or with neighbours.
+Your AI agent pools buyers, sellers' agents bid blind, and PayPal holds the money until delivery. Cars with neighbours, or a pro for your home: buy together, pay on proof.
 
 ## Tagline options
-- Your money, held until it's done.
-- Fair prices. Paid on proof.
+- Buy together. Pay on proof.
+- An agent that buys like a crowd and pays like an escrow.
 
 ## About the project (story)
 
 ### Inspiration
-Home repair was **Tennessee's #1 consumer complaint in 2025, at a record high**. The FTC logged **81,925 home-improvement fraud reports in 2024**, and "failure to return deposits" tops the lists. California even caps contractor down payments at **$1,000 or 10%**. Meanwhile small buyers get one quote, often on the doorstep, and pay up front.
+Two everyday purchases are broken the same way. **Buying a car:** dealers save their volume prices for fleets, so five neighbours buying Toyotas one at a time all pay near sticker. **Hiring a pro:** you pay up front and hope. The FTC logged **81,925 home-improvement fraud reports in 2024**, "failure to return deposits" tops complaint lists, and California even caps contractor down payments at **$1,000 or 10%**.
 
-AI shopping agents could help, but a 2026 study showed that when an agent chats with a seller, the seller can work out the most you'd pay. We wanted the opposite: **agents that compete for you without ever learning your limit, and money that only moves on proof.**
+AI shopping agents could help, but a 2026 study showed that when an agent chats with a seller, the seller can work out the most you'd pay. We wanted the opposite: **agents that pool buyers and make sellers compete without ever learning anyone's max price, and money that only moves on proof, held by PayPal, not by us.**
 
 ### What it does
-1. **Ask.** "Water heater leaking, fix by Friday, max $400, licensed only." An AI agent (NVIDIA Nemotron) turns it into a structured, funded request.
-2. **Hold.** You approve one **PayPal hold** (Orders v2 `AUTHORIZE`) at your private limit. It's reserved, not paid.
-3. **Compete.** Pros' AI agents see only the job, area and number of funded homes, never your limit. Each submits a **sealed bid**: a SHA-256 commitment that nobody, including us, can read or change before the close.
-4. **Award.** Bids are revealed and checked against their commitments. Deterministic clearing picks the best offer that meets your requirements, and the AI checks the winner's promises.
-5. **Prove.** The pro photographs the finished job with a **one-time code** in frame. Code checks reuse and freshness; Nemotron VL vision checks the code and the work.
-6. **Pay.** A **policy gate** allows a partial capture only of the final price, only ≤ your hold, only after proof. The rest is released to you, and **PayPal Payouts** pays the pro.
+**1. Cars, bought together (lead use case).** Maria leaves a voice note: "A RAV4 Hybrid, max $35,500, Austin." NVIDIA Nemotron structures it and asks the follow-ups a good salesperson would (trim, trade-in, financing). Her neighbours want **different models from the same dealership** (Camry, Corolla Cross, Grand Highlander). Each joins with a **$500 refundable deposit** approved in PayPal's own popup (Orders v2 `AUTHORIZE`). Dealers' AI agents seal **one fleet discount off MSRP** for the whole group (SHA-256 commit–reveal). Code picks the winner (8.7% off every model in the demo); each buyer pays their own model's discounted price; anyone whose private max is below it is released and their deposit voided: $0.
 
-**Together mode:** neighbours who need the same job join with their own holds. A provider's single trip makes the per-home price lower, everyone pays the same price, anyone below it is released, and a **best-of guarantee** means you never pay more than a solo quote you already have.
+**2. Hire a pro, pay on proof.** Licensed pros send sealed quotes; if there are too few, the agent **phones local pros who aren't on Aeonith yet** and they bid too. Maria books the winner, and PayPal holds **exactly the sealed price**. When the work is done the pro records **video proof**: frames are stamped with a live session that expires in 2 minutes, and NVIDIA vision confirms it's this job, finished. The pro requests payment; when they ask for **$380 instead of the sealed $336**, the policy gate refuses the capture, Maria's **agent calls her**, PayPal captures only $336, pays the pro with **Payouts**, and the overcharge goes on the pro's record.
 
-**Agentic, on PayPal rails:**
-- **Autopilot (PayPal Vault):** a leak sensor files the job and Aeonith places a hold on the buyer's **vaulted PayPal** (Orders v2 AUTHORIZE with `vault_id`, merchant-initiated, capped by the budget they approved). Pros bid before the buyer wakes up.
-- **Voice Agent:** the agent calls the buyer at the two money moments, reading real PayPal numbers ("PayPal is holding $450… say *approve*"). The spoken answer is the human approval the policy gate needs before capture, fingerprinted into the audit chain.
-- **Live Proof:** a camera session with a code that exists only once the session starts and expires in 2 minutes; NVIDIA vision reads the handwritten code and checks the work.
-- **Recruiting calls:** the agent phones offline pros about the already-funded job; winners are paid by **Payouts to email** without needing a PayPal account first.
+**3. Autopilot (PayPal Vault, add-on).** Save PayPal once with an emergency budget. A leak sensor at 3 a.m. files the job and places a merchant-initiated hold on the saved wallet (Orders v2 `AUTHORIZE` with `vault_id`), no redirect; pros bid before you wake, and nobody is sent until you approve on the agent's call.
 
-**Beyond services: item pools.** The same loop works for goods:
-- **Car pool:** five buyers want the same model and trim from one dealership. Each holds only a **$500 refundable deposit**, while their private max price decides whether they're in. Dealer agents seal per-car bids, and the winner gets 4 committed buyers at **$31,980/car**. At delivery (a VIN photo with the one-time code) the deposits are captured and applied, and the balance is paid at the sealed price.
-- **Bulk order:** eight parents buy the same Chromebook at **$267** against ~$349 retail.
-- **Next:** appliances, solar group buys, school orders and small-business restock.
+**Why only PayPal:** authorize-now/capture-later is the escrow; partial capture with `final_capture` + void makes "pay exactly the sealed price" automatic; Payouts pays dealers and pros (even ones recruited by phone an hour ago) to an email; Vault makes Autopilot possible; reauthorization and webhooks keep long deals honest; and buyers already have PayPal.
+
+**Also built:** street groups with a best-of guarantee (never pay more than your own solo quote), bulk orders with real products and retail prices from the **Channel3** catalog, an MCP Offer Protocol any seller's agent can use, AG Grid Enterprise comparisons and audit log, a Bryntum Scheduler of booked jobs, a tamper-evident hash-chained audit log, and a light/dark UI.
 
 **How PayPal earns:**
 - a processing fee on every capture
@@ -64,7 +54,7 @@ The eight demo scenarios move about $4,976 through 18 captures and 5 payouts, wo
   - a **hash-chained, tamper-evident audit log**
   - a Sybil check for duplicate provider identities
 - **Experience:** a real-time **three.js** 3D claw that *holds your card* and follows the job (grips when held, sparks during bidding, scans during proof, drops the card to the pro on payment), plus **GSAP** motion, **Bryntum Scheduler** for booked jobs, and **AG Grid Enterprise** for the audit log (filters, row grouping), AI-usage grid and the sealed-offer comparison on every job.
-- **Stack:** Node 22, TypeScript, Express 5, Zod 4. 18 automated tests cover clearing, commit–reveal, the policy gate, the audit chain, proof, reauthorization, the full solo, group and car-pool (deposit) flows, and Autopilot → Voice Agent → Live Proof → voice release, including holds blocked outside the Autopilot budget or scope.
+- **Stack:** Node 22, TypeScript, Express 5, Zod 4. 20 automated tests cover clearing, commit–reveal, the policy gate, the audit chain, proof, reauthorization, the full solo, group and car-pool (deposit) flows, and Autopilot → Voice Agent → Live Proof → voice release, including holds blocked outside the Autopilot budget or scope.
 
 ### Challenges
 - Making the money path impossible for an AI to bend: seller text never reaches payment code; only schema-checked offers do, and PayPal itself refuses captures above the hold.

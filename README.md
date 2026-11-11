@@ -1,6 +1,6 @@
 # Aeonith
 
-**Compete → hold → prove → pay.** Tell your agent what you need done and the most you'll pay. Verified providers' AI agents compete for the job with **sealed bids**. **PayPal holds your money** (reserved, not charged) and pays the winner only when the job is **proven done**. Alone, you get competing quotes without haggling. With neighbours, you also get the group price.
+**Buy together. Pay on proof.** Your AI agent pools buyers who want the same kind of thing from the same seller (cars from one dealership, a street's gutter job, a batch of laptops), makes sellers' AI agents compete with **sealed bids**, and lets **PayPal hold the money** until the deal is delivered. Alone, you get competing sealed quotes without haggling and pay only on proof. Together, you also get the fleet price.
 
 Built for the [PayPal AI Hackathon 2026](https://paypalaihackathon.devpost.com/). **Sandbox only**: no real money moves.
 
@@ -9,14 +9,22 @@ Built for the [PayPal AI Hackathon 2026](https://paypalaihackathon.devpost.com/)
 - California caps contractor down payments at **$1,000 or 10%, whichever is less** ([CSLB](https://www.cslb.ca.gov/Resources/IndustryBulletins/2022/Industry_Bulletin_Progress_Payment_Restrictions.pdf)). Deposits are risky enough that the law steps in.
 - Small buyers get one quote, often on the doorstep, and pay up front. AI shopping agents make it worse if they chat with sellers, because they leak what you'd pay ([2026 study](https://arxiv.org/abs/2604.26220)).
 
+### Three use cases, one engine
+| | What happens | PayPal |
+|---|---|---|
+| **1. Cars, bought together** (lead) | Neighbours who want Toyotas (different models!) from one dealership pool. Each joins with a **$500 refundable deposit**. Dealers' agents seal **one fleet discount off MSRP** for the whole group; each buyer pays their own model's price. Buyers whose private max is below their model's price are released: $0. | Deposit `AUTHORIZE` → capture applied at delivery, void for those out → Payouts |
+| **2. Hire a pro, pay on proof** | Licensed pros send sealed quotes (the agent phones pros who aren't on Aeonith yet if there are too few). You **book the winner** and PayPal holds **exactly the sealed price**. Video proof checked by NVIDIA vision; the pro requests payment; anything above the sealed price is **blocked, escalated by a call, and flagged**. | `AUTHORIZE` at booking (JS SDK popup) → capture only the sealed price → Payouts |
+| **3. Autopilot** (add-on) | Save PayPal once with an emergency budget. A leak sensor files the job at 3 a.m. and funds it on the saved wallet, no redirect; nobody is sent until you approve on the agent's call. | **Vault v3** → merchant-initiated `AUTHORIZE` with `vault_id` |
+
 ## How it works
 | Step | What happens | Who decides |
 |---|---|---|
 | 1. Ask | “Water heater leaking, fix by Friday, max $400, licensed only.” The AI agent (NVIDIA Nemotron, or Claude) turns it into a structured request. | AI (schema-validated output) |
-| 2. **Hold** | You approve **one PayPal hold** at your limit (Orders v2 `intent: AUTHORIZE`). | You, in PayPal |
+| 2. **Hold** | Pools: each buyer approves a refundable deposit hold. Hire-a-pro: after sealed quotes, you book the winner and approve a hold of **exactly the sealed price**, in PayPal's own popup (JS SDK, Orders v2 `intent: AUTHORIZE`). | You, in PayPal |
 | 3. **Compete** | Provider agents see only the job, area, number of funded homes and deadline. **Never your limit.** Each submits `SHA-256(offer + salt)`. | Provider agents |
 | 4. Reveal & award | After close, providers reveal and each offer is checked against its hash. Deterministic clearing picks the best offer that meets your requirements. In **Together** mode everyone pays the same price, and anyone below it is released. | Code |
-| 5. **Prove** | The provider photographs the finished job with a **one-time code** in frame. Code checks reuse and freshness; AI vision (Nemotron VL) checks the code and the work. | Code + AI advise, you confirm |
+| 5. **Prove** | The provider records **video proof** in the Aeonith camera: every frame is stamped with the job's live session and time (2-minute window) and fingerprinted, so an old or reused video can't pass. NVIDIA vision (Nemotron VL) checks that it is this job, finished, with observations, concerns and a confidence score. Photo/video upload goes through the same checks. | Code + AI advise, you confirm |
+| 5b. **Request payment** | The provider asks to be paid. If the amount is above the sealed price, the policy gate refuses the capture, your agent **calls you**, PayPal captures only the sealed price, and the overcharge goes on the provider's record. You can also release payment yourself. | Code + your voice/tap |
 | 6. **Pay** | The **policy gate** allows capture only of the final price, only ≤ your hold, only after proof or your confirmation. Then: partial capture (the rest is released to you) → **Payouts** to the provider. | Code + PayPal |
 
 Every step is written to a **hash-chained audit log**. Editing any past entry breaks the chain.
@@ -26,21 +34,25 @@ Every step is written to a **hash-chained audit log**. Editing any past entry br
 |---|---|---|
 | **Autopilot: the home files the job itself** | You save PayPal once with an emergency budget (e.g. $450, plumbing). A leak sensor reports water at 3 a.m. Aeonith files the job, places a **hold on your vaulted PayPal with no redirect**, and pros' agents seal their bids before you wake up. Nobody is dispatched until you approve on a call. | **Vault v3** setup token → payment token, then **Orders v2 `AUTHORIZE` with `vault_id`** (merchant-initiated). The policy gate caps it at your budget and approved trades |
 | **Voice Agent** | Your agent rings you at the two money moments: "PayPal is holding $450. Lone Star won at $360, 12-month warranty. Say *approve* to book." and later "Proof passed. PayPal captures $360 and releases $90. Say *release payment*." Spoken (Web Speech) or tapped. Approval is decided by deterministic phrase matching, never by AI, and each answer is **SHA-256 fingerprinted into the audit chain**. | Your spoken "release payment" is the human approval the policy gate requires before **Payments v2 capture** and **Payouts** |
-| **Live Proof** | Instead of uploading a photo, the pro opens a camera session. The one-time code is created only when the session starts and **expires in 2 minutes**, so an old photo or video can't pass. NVIDIA vision reads the handwritten code and checks the work, frame by frame. | Proof is the gate for **capture**; no proof, nothing moves |
+| **Video proof** | The pro records the finished work in the Aeonith camera. Frames are stamped with a session that exists only from that moment and **expires in 2 minutes**, so an old photo or video can't pass. NVIDIA vision checks the work frame by frame and shows what it saw. | Proof is the gate for **capture**; no proof, nothing moves |
+| **Overcharge call** | The pro asks for more than the sealed price. The gate refuses that capture, your agent calls ("They asked for $380. You booked them at $336, so I blocked the extra $44"), and on "pay the agreed price" PayPal captures only $336 and the pro is flagged. | **Payments v2 capture** can never exceed the sealed price |
+| **Ask, by voice** | Leave a voice note; NVIDIA Nemotron structures it and asks 2–3 follow-up questions (trim, trade-in, access…) that change the offers. | Better requests, fewer surprises at capture |
 | **Recruiting calls** | Too few bids? Your agent phones local pros who aren't on Aeonith yet and pitches the **already-funded** job: "PayPal is holding $400 on the buyer's account." Those who accept seal a bid through the same protocol. | Winners are paid by **Payouts to their email**: no PayPal account needed in advance; they claim the money (and join PayPal) |
-| **PayPal rail on every job** | A timeline of every PayPal object behind the job: order, authorization (or vaulted MIT authorization), reauthorization, capture with `final_capture`, voids and the Payouts batch, with IDs and amounts. | Read straight from the audit chain |
+| **Activity on every job** | One readable timeline of every PayPal call (order, authorization or vaulted authorization, reauthorization, capture with `final_capture`, void, Payouts batch, with IDs), plus every agent, AI and policy decision. | Read straight from the audit chain |
 
 ### What's technically new
 - **Commit–reveal sealed bids:** nobody, including Aeonith, can read or leak a bid early, and a revealed bid can't be changed.
 - **Offer Protocol as an MCP server** (`npm run mcp`): any MCP-capable provider agent can discover funded jobs and bid. The protocol has no field that can carry a buyer's limit, and a test proves it.
 - **Payment policy gate** in front of every PayPal call; the AI can never move money ([src/core/policy.ts](src/core/policy.ts)).
-- **Proof Challenge** with code checks + AI vision ([src/core/proof.ts](src/core/proof.ts)).
+- **Catalog pools:** buyers pick different models from one seller; sellers seal one fleet discount; each buyer is cleared at their own model's price ([src/core/clearing.ts](src/core/clearing.ts) `clearCatalog`).
+- **Quote-first booking:** sealed quotes before any money moves; the hold equals the sealed price ([src/core/policy.ts](src/core/policy.ts)).
+- **Proof** with stamped live sessions, reuse detection + AI vision ([src/core/proof.ts](src/core/proof.ts)).
 - **Together mode:** uniform-price clearing with a **best-of guarantee**, so you never pay more than your own solo quote ([src/core/clearing.ts](src/core/clearing.ts)).
 - **Tamper-evident audit log** ([src/core/audit.ts](src/core/audit.ts)).
 
 ## Built with
 - **PayPal (sandbox):**
-  - Orders v2: `AUTHORIZE` (buyer-approved), and `AUTHORIZE` with **`vault_id`** (merchant-initiated, Autopilot)
+  - **PayPal JS SDK** buttons (popup approval) + Orders v2: `AUTHORIZE` (buyer-approved), and `AUTHORIZE` with **`vault_id`** (merchant-initiated, Autopilot)
   - **Vault v3**: setup tokens + payment tokens (save PayPal once for Autopilot)
   - Payments v2: partial capture with `final_capture`, void, reauthorize, refund
   - **Payouts v1**
@@ -53,6 +65,7 @@ Every step is written to a **hash-chained audit log**. Editing any past entry br
   - vision proof checks
 
   **Every NVIDIA request is metered**: credits count down from your balance, with tokens, latency and purpose per call. The count is persisted, shown on the Trust page, and available at `GET /api/ai/usage` and via `npm run nvidia:check`. Claude (`claude-opus-5-5`) is supported as an alternative provider. Every AI step has a deterministic fallback, so the app runs without any key.
+- **Channel3** product catalog API: real products, images and retail prices for item pools (electronics, appliances)
 - **Model Context Protocol** TypeScript SDK (provider-facing MCP server)
 - **AG Grid Enterprise** (Trust page audit log with filters and row grouping, AI usage grid, sealed-offer comparison on every job)
 - **Bryntum Scheduler** (booked jobs view; trial package, so it shows a watermark)
@@ -85,7 +98,7 @@ Visual direction was inspired by the "Daily Bank" fintech concept by Nixtio on D
 npm install
 cp .env.example .env      # fill PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET (sandbox), ADMIN_TOKEN; NVIDIA_API_KEY (or ANTHROPIC_API_KEY) and AG_GRID_LICENSE_KEY optional
 npm run dev               # http://localhost:3000
-npm test                  # 18 tests: clearing, commit–reveal, policy gate, audit chain, proof, reauthorize, solo + group + car-pool, Autopilot + Voice Agent + Live Proof
+npm test                  # 20 tests: clearing (incl. multi-model fleet pools), commit–reveal, policy gate, audit chain, proof, reauthorize, quote-first booking + overcharge, Autopilot + Voice Agent + video proof
 npm run sandbox:check     # confirms your PayPal sandbox keys work (prints no secrets)
 npm run nvidia:check      # confirms the NVIDIA key + models work and prints credits left (spends 2 credits)
 npm run demo              # with the server running: drives every flow end to end and fills the app with realistic jobs

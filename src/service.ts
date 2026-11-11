@@ -565,10 +565,9 @@ export class Aeonith {
       lines.push(`${r.commitments.length} pros sealed their bids. ${a.providerName} won at $${fmt(a.priceCents)}${promises ? `, licensed, with a ${promises.warrantyMonths}-month warranty` : ""}.`);
       lines.push(`Say "approve" and I'll book them. You'll only be charged after photo proof.`);
     } else if (intent === "overcharge") {
-      lines.push(`Hi ${name}, it's your Aeonith agent. ${a.providerName} finished the job and the video proof passed.`);
-      lines.push(`But they've asked for $${fmt(pr?.amountCents ?? 0)}. The sealed price you booked was $${fmt(charge)}. That's $${fmt(pr?.overchargeCents ?? 0)} more than agreed, so I've blocked it.`);
-      lines.push(`PayPal will only capture the agreed $${fmt(charge)}. Nothing extra leaves your account, and I'll put a warning on their record.`);
-      lines.push(`Say "pay the agreed price" to release $${fmt(charge)}, or "stop" to keep everything on hold.`);
+      lines.push(`Hi ${name}, it's your Aeonith agent. ${a.providerName} finished, and the video proof passed.`);
+      lines.push(`But they asked for $${fmt(pr?.amountCents ?? 0)}. You booked them at $${fmt(charge)}, so I blocked the extra $${fmt(pr?.overchargeCents ?? 0)}.`);
+      lines.push(`PayPal will only capture $${fmt(charge)}, and I'll flag the overcharge. Say "pay the agreed price", or "stop".`);
     } else {
       lines.push(`Hi ${name}, it's your Aeonith agent. ${a.providerName} says the job is done and asked to be paid.`);
       lines.push(r.proof?.verdict === "pass" ? `I checked their video: it was recorded live, and the work matches your job.` : `The proof needs your eyes: ${r.proof?.aiSummary ?? "please check the video"}.`);

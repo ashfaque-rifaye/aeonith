@@ -963,7 +963,7 @@ async function openCall(r, intent) {
     try {
       const out = await post(`/api/requests/${r.id}/voice`, { intent, transcript, method });
       const ok = out.consent.approved;
-      await speak(ok ? (intent === "book" ? "Booked. I'll call you again when the proof is in." : intent === "overcharge" ? "Done. PayPal captured only the agreed price, the pro is being paid, and the overcharge is on their record." : "Done. PayPal captured the payment and the pro is being paid.") : "Understood. Nothing moves until you say so.");
+      await speak(ok ? (intent === "book" ? "Booked. I'll call you again when the proof is in." : intent === "overcharge" ? "Done. Only the sealed price was captured, and the overcharge is flagged." : "Done. PayPal captured the payment and the pro is being paid.") : "Understood. Nothing moves until you say so.");
       el.querySelector("#cx-sub").innerHTML = `${ok ? "Approved" : "Declined"} · <span class="mono">sha256 ${out.consent.sha256.slice(0, 12)}…</span>`;
       toast(ok ? (intent === "book" ? "Booked by voice." : intent === "overcharge" ? "Agreed price paid. Overcharge refused and flagged." : "Released by voice: captured on PayPal and paid out.") : "Declined on the call. Nothing moved.");
     } catch (e) { toast(e.message, 6000); }
@@ -1380,16 +1380,18 @@ async function recruitLive(r, btn) {
     box.innerHTML = `<div class="lc-h"><span class="lc-dot"></span><b>Calling ${esc(c.party)}</b><span class="mono small muted">${esc(c.phone || "")}</span><span class="chip">2× speed</span></div><div class="bubbles"></div>`;
     host.append(box);
     const bub = box.querySelector(".bubbles");
+    const fast = calls.indexOf(c) > 0;
     for (const l of c.lines) {
+      if (fast) { const d = document.createElement("div"); d.className = `bub ${l.who}`; d.innerHTML = `<small>${l.who === "agent" ? "Aeonith agent" : esc(c.party)}</small>${esc(l.text)}`; bub.append(d); continue; }
       const d = document.createElement("div");
       d.className = `bub ${l.who} typing`;
       d.innerHTML = `<small>${l.who === "agent" ? "Aeonith agent" : esc(c.party)}</small><span class="dots"><i></i><i></i><i></i></span>`;
       bub.append(d);
       host.scrollTop = host.scrollHeight;
-      await new Promise((ok) => setTimeout(ok, 450));
+      await new Promise((ok) => setTimeout(ok, 200));
       d.classList.remove("typing");
       d.innerHTML = `<small>${l.who === "agent" ? "Aeonith agent" : esc(c.party)}</small>${esc(l.text)}`;
-      await new Promise((ok) => setTimeout(ok, Math.min(2600, 500 + l.text.length * 16)));
+      await new Promise((ok) => setTimeout(ok, Math.min(1500, 250 + l.text.length * 9)));
     }
     box.querySelector(".lc-h").insertAdjacentHTML("beforeend", `<span class="chip ${/Joined/.test(c.outcome) ? "ok" : "warn"}">${esc(c.outcome)}</span>`);
     box.querySelector(".lc-dot").classList.add("off");
@@ -1522,7 +1524,9 @@ function wireNew() {
   $("#apply-answers")?.addEventListener("click", (e) => act(e.currentTarget, async () => {
     const qa = (ui.questions?.questions || []).filter((x) => ui.answers?.[x.id]).map((x) => `${x.question} ${ui.answers[x.id]}.`).join(" ");
     const text = `${$("#intake").value.trim()} ${qa}`.trim();
-    ui.draft = { ...(await post("/api/intake", { text })), source: "ai" };
+    const fresh = await post("/api/intake", { text });
+    const keep = (k) => (fresh[k] === "" || fresh[k] === 0 || fresh[k] == null ? ui.draft?.[k] : fresh[k]);
+    ui.draft = { ...ui.draft, ...fresh, ...Object.fromEntries(["zip", "limitDollars", "completeBy", "minWarrantyMonths", "category"].map((k) => [k, keep(k)])), licensed: fresh.licensed || ui.draft?.licensed, source: "ai" };
     ui.text = text;
     ui.questions = { questions: [], source: "ai" };
     toast("Updated with your answers.");
