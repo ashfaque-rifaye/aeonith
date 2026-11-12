@@ -145,3 +145,73 @@ Narration is AI-generated (Microsoft neural voices).
 ```
 
 **Settings:** Public · not made for kids · category Science & Technology · tags: PayPal, PayPal sandbox, AI agents, NVIDIA Nemotron, agentic commerce, escrow, sealed bid, hackathon, AG Grid, Bryntum, Channel3, APIMatic, Render · thumbnail: a frame from 0:05 (the home page) or 0:11 (architecture).
+
+---
+
+## Gallery images
+`docs/gallery/01–17` (1800×1200, 3:2): live screenshots of https://aeonith.onrender.com, each in a browser window showing the exact URL it came from, plus PayPal's own sandbox checkout windows and the architecture diagram. Suggested captions:
+
+| File | Caption |
+|---|---|
+| 01-home | Aeonith: buy together, pay on proof. Live on Render, PayPal sandbox, NVIDIA Nemotron |
+| 02-problem | The problem: buyers pay sticker price, alone, often up front |
+| 03-why-paypal | Why it only works on PayPal: authorize, capture the sealed price, void the rest, Payouts, Vault |
+| 04-car-pool | Six neighbours, four Toyota models, one dealership: every deposit is a PayPal hold |
+| 05-sealed-bids | Dealers' AI agents bid blind: every bid sealed with SHA-256, opened together |
+| 06-savings-ag-grid | 8.7% off every model, $14,632 saved together; AG Grid shows every sealed offer side by side |
+| 07-paypal-deposit | PayPal's real checkout: a $500 deposit authorized, not charged |
+| 08-sealed-quotes-sdk-agent | Sealed quotes, including an outside pro's agent bidding through the APIMatic SDK |
+| 09-bryntum-booking | The booked slot on the pro's Bryntum schedule |
+| 10-paypal-booking | PayPal authorizes exactly the sealed price: $336 |
+| 11-video-proof | NVIDIA vision checks live, stamped video proof |
+| 12-paid-on-proof | Overcharge blocked; PayPal captures $336 and Payouts pays the pro |
+| 13-autopilot | Autopilot: PayPal saved with Vault, a budget, and a sensor |
+| 14-autopilot-job | A leak sensor filed and funded the job on the saved wallet: no login |
+| 15-trust | Trust log: hash-chained audit and metered NVIDIA calls (AG Grid) |
+| 16-pros-schedule | Pros' booked jobs on a Bryntum Scheduler |
+| 17-architecture | Architecture: people, the Aeonith engine, PayPal money rails, Render |
+
+---
+
+## Form questions
+
+### Explain how your project meets the main technology requirement
+Aeonith is built on PayPal and AI together; neither is bolted on.
+
+**PayPal is the money layer of every flow (sandbox):**
+- Every deposit and booking is an **Orders v2 `AUTHORIZE`** approved in PayPal's own checkout window (JS SDK): money is held, not paid.
+- **Payments v2** captures only the sealed price (partial capture with `final_capture`), **voids** buyers who are priced out, **reauthorizes** holds past the 3-day honor period (a Render cron job), and refunds.
+- **Payouts v1** pays the dealer or pro, even one recruited by phone an hour earlier.
+- **Vault v3** lets Autopilot fund an emergency on a saved wallet (merchant-initiated `AUTHORIZE` with `vault_id`) with no redirect.
+- **Webhooks** with signature verification, and `PayPal-Request-Id` idempotency on every call.
+- A policy gate checks every PayPal call: capture can never exceed the sealed price or the hold.
+
+**AI runs the market around the money:**
+- **NVIDIA Nemotron** (text + vision) turns a voice note into a structured request and asks follow-up questions, writes seller agents' pitches, checks the winner's promises, and verifies the pro's live video proof.
+- **AI agents on both sides:** the buyer's agent pools buyers, phones pros who aren't on Aeonith yet, and calls the buyer at money moments; sellers' agents (simulated, plus an outside agent using our APIMatic SDK or MCP server) seal bids with SHA-256.
+- AI advises and code decides money: clearing is deterministic, and approvals are fingerprinted consent.
+
+The result is a working, deployed product (https://aeonith.onrender.com) where AI agents move sandbox money only through PayPal holds, captures, voids and payouts.
+
+### If you used the APIMatic Context Plugin, share your experience
+We did not use the Context Plugin. We used **APIMatic's code-generation API** directly: we wrote an OpenAPI 3 spec for the Aeonith Offer Protocol (`docs/openapi.yaml`), validated it with APIMatic, and generated a TypeScript SDK (`sdk/typescript`). Sellers' own agents now bid through it: the MCP server, and a stand-alone seller agent that runs as a Render background worker.
+- **Worked well:** validation flagged missing descriptions before generation; the SDK came with typed models, request validation, retries and a full docs folder; a server variable in the spec gave us a configurable base URL (local, Render, private network).
+- **Issues:** an operation named `createRequest` collided with a method on the SDK's base class, so we renamed it; importing the generated TypeScript source straight into an ESM project failed (type-only re-exports), so we build the SDK and import the compiled package.
+- **Compared to hand-written HTTP:** the agents lost their ad-hoc `fetch` code and gained typed requests and responses for the commit–reveal protocol; regenerating after a spec change takes one API call.
+
+### If you used AG Grid, what was your experience building with AG Grid/AG Charts/AG Studio?
+We used **AG Grid Enterprise** in three places: under every winner, a grid of each seller's sealed offer side by side (price, minimum units, warranty, licence) so buyers can check how code picked the winner; the Trust page's hash-chained audit log, with column filters and row grouping; and the NVIDIA usage grid (tokens, latency, credits per call). It dropped into a vanilla-JS app quickly: column definitions plus row data, and the dark theme matched our design with a few CSS variables. Filtering and grouping hundreds of audit rows needed no extra code. The one thing to handle was licensing: the trial key is validated in the browser, so we serve it from configuration rather than committing it.
+
+### Overall experience rating
+**5/5 (Excellent).** The sandbox let us exercise every primitive we needed (authorize, partial capture, void, reauthorize, Payouts and Vault) end to end without real money, and the webinars and docs made the authorize/capture model clear. PayPal holds and AI agents turned out to be a natural fit: a hold gives agents something trustworthy to bid on. Feedback: a sandbox shortcut for the 3-day honor period (to test reauthorization without waiting) and longer sandbox login sessions would have saved time.
+
+### Which AI tools have you leveraged while working on this project?
+- **In the product:** NVIDIA Nemotron (`nemotron-3.5-super-vl`, text + vision) via the NVIDIA API catalog; Claude (Anthropic) is supported as an alternative provider.
+- **To build it:** Claude Code (Anthropic) as an AI pair programmer for code, tests, deployment scripts and the demo-video pipeline.
+- **For the video:** Microsoft neural text-to-speech voices for the narration and the agent's voice.
+
+### Describe the level of learning you/your team derived from the project
+High. We learned to design a marketplace around authorization holds instead of payments: when to authorize, how partial capture with `final_capture` and void make "pay exactly the sealed price" automatic, how the 3-day honor period drives reauthorization, and how Vault enables merchant-initiated holds. On the AI side we learned to keep models out of the money path (schema-validated output, deterministic clearing, fingerprinted consent), to use commit–reveal so agents can't leak a buyer's budget, and to use vision models for proof with honest confidence scores. And we learned to ship it: an OpenAPI-first SDK, a multi-service Render deployment, and a reproducible demo pipeline.
+
+### Did you gain AI value that you can use in your career?
+**Yes.** Building agents that act on both sides of a transaction, safely, with a payment provider enforcing the limits, applies directly to agentic commerce work.
