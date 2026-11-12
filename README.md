@@ -172,7 +172,7 @@ sequenceDiagram
   A->>A: Policy gate: capture > sealed price → BLOCKED
   A->>Maria: Agent calls: "They asked $380, you booked $336. I blocked the extra $44."
   Maria->>A: "Pay the agreed price" (fingerprinted consent)
-  A->>PP: Capture $336 → Payouts to the pro; overcharge flagged
+  A->>PP: Capture $336 → Payouts to the pro, overcharge flagged
 ```
 
 | A pro's own agent bids through the APIMatic SDK | The booking on the pro's Bryntum schedule |
@@ -200,7 +200,7 @@ sequenceDiagram
   Maria->>PP: Once: save PayPal for Autopilot (Vault v3 setup token), budget $450
   H->>A: 3 a.m.: water on the garage floor
   A->>PP: AUTHORIZE $450 on the vaulted wallet (no login, no redirect)
-  A->>A: Pros bid blind; code picks the winner
+  A->>A: Pros bid blind, code picks the winner
   A->>Maria: Agent calls: "PayPal is holding $450, not paid. Say approve to book."
   Maria->>A: "Approve, book them."
   Note over A,PP: After proof: capture only the winning price, release the rest
