@@ -83,28 +83,25 @@ Authorization holds are an underrated trust primitive: hold, partial capture, vo
 - Not legal advice.
 
 ## Built with
-paypal, paypal-orders-v2, paypal-payments, paypal-payouts, paypal-webhooks, nvidia, nemotron, nvidia-nim, claude, model-context-protocol, ag-grid, typescript, node.js, express, zod, three.js, gsap, bryntum, render
+paypal, paypal-orders-v2, paypal-payments, paypal-payouts, paypal-vault, paypal-webhooks, apimatic, channel3, nvidia, nemotron, nvidia-nim, claude, model-context-protocol, ag-grid, typescript, node.js, express, zod, three.js, gsap, bryntum, render
 
 ## Links
-- Repo: [[GitHub URL]]
-- Demo: [[Render URL]]
+- Repo: https://github.com/ashfaque-rifaye/aeonith
+- Demo: https://aeonith.onrender.com (PayPal sandbox)
 - Video: [[YouTube URL]]
 
 ## Testing instructions for judges
-1. Open [[demo URL]] (or run locally: `npm install && cp .env.example .env && npm run dev`).
-2. On the job page, click **Hold $400 with PayPal** and log in with the sandbox buyer **[[sb-nsxra53758944@personal.example.com / password]]**.
-3. Follow the button on the page:
-   1. **Invite pros' agents to bid**
-   2. **Unseal bids & pick winner**
-   3. **Pro: start job · get code**
-   4. Upload any photo
-   5. **Confirm the job is done**
-   6. **Release payment**
-4. See the captures, payout and the hash-chained **Trust log**.
-5. Try **"Test: let an agent overcharge"**: the policy gate blocks it.
+1. Open https://aeonith.onrender.com (or run locally: `npm install && npm run build:sdk && cp .env.example .env && npm run dev`).
+2. **Start a request → Hire a pro**, let the agent understand it, then **Ask for sealed quotes**. One quote comes from an outside pro's agent (Render worker, APIMatic SDK).
+3. **Open the sealed quotes**, then **Book with PayPal**: approve in PayPal's window with the sandbox buyer **[[sb-nsxra53758944@personal.example.com / password]]**. The slot appears on the pro's Bryntum schedule.
+4. **Pro: record video proof** (any camera or an uploaded photo/video), then in the pro's app request more than the quote: the gate blocks it and the agent calls you. Say or tap **Pay the agreed price**.
+5. See the capture, the Payouts batch and the overcharge flag in **Activity**, and the hash-chained **Trust** log.
+6. Cars: **Start a request → Buy together**, pick a model, join with a $500 PayPal deposit, add neighbours, ask dealers, open the bids (AG Grid table under the winner).
 
 ## Sponsor tools to tick
 - NVIDIA (Nemotron via the NVIDIA API catalog: intake, pitches, promise checks, vision proof)
-- AG Grid (Enterprise: audit log, AI usage, sealed-offer comparison)
-- Bryntum (Scheduler: booked jobs)
-- Render (hosting), if deployed there
+- AG Grid (Enterprise: sealed-offer comparison on every job, audit log, AI usage)
+- Bryntum (Scheduler: booked slot on the job page, booked pros)
+- Channel3 (live product search for buy-together pools)
+- APIMatic (TypeScript SDK generated from docs/openapi.yaml; seller agents and the MCP server bid through it)
+- Render (web service + disk, seller-agent worker, hold-sweeper cron)

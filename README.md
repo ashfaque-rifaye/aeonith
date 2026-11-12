@@ -65,10 +65,12 @@ Every step is written to a **hash-chained audit log**. Editing any past entry br
   - vision proof checks
 
   **Every NVIDIA request is metered**: credits count down from your balance, with tokens, latency and purpose per call. The count is persisted, shown on the Trust page, and available at `GET /api/ai/usage` and via `npm run nvidia:check`. Claude (`claude-opus-5-5`) is supported as an alternative provider. Every AI step has a deterministic fallback, so the app runs without any key.
-- **Channel3** product catalog API: real products, images and retail prices for item pools (electronics, appliances)
+- **Channel3** product catalog API: live search for the exact product a pool buys (real images and retail prices), e.g. eight parents pooling for one Chromebook model
+- **APIMatic**: [`docs/openapi.yaml`](docs/openapi.yaml) generates the TypeScript SDK in [`sdk/typescript`](sdk/typescript). Sellers' own agents bid through it: the MCP server and [`scripts/seller-agent.ts`](scripts/seller-agent.ts) (seal with SHA-256, reveal after close) use the SDK, not hand-written HTTP
+- **Render** ([render.yaml](render.yaml), live at https://aeonith.onrender.com): web service with a persistent disk; a background worker running a pro's SDK bidding agent over Render's private network; a cron job every 6 hours that reauthorizes PayPal holds past the 3-day honor period and releases holds on requests that closed with no winner. `node scripts/render-env.mjs` copies secrets from `.env` to Render and deploys
 - **Model Context Protocol** TypeScript SDK (provider-facing MCP server)
-- **AG Grid Enterprise** (Trust page audit log with filters and row grouping, AI usage grid, sealed-offer comparison on every job)
-- **Bryntum Scheduler** (booked jobs view; trial package, so it shows a watermark)
+- **AG Grid Enterprise**: every sealed offer side by side on each job (so buyers can check the clearing), plus the Trust page audit log (filters, row grouping) and AI usage grid
+- **Bryntum Scheduler**: a booked pro's slot appears on their schedule on the job page, next to their other Aeonith jobs; the Pros page shows every booked pro (trial package, so it shows a watermark)
 - **three.js** (real-time 3D claw that holds the card and follows the job's state), **GSAP + ScrollTrigger** (motion), **Lenis** (smooth scroll)
 - Node 22, TypeScript, Express 5, Zod 4
 
