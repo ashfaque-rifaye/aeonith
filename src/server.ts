@@ -72,6 +72,7 @@ app.get("/api/health", (_req, res) => {
     ai: agent.label,
     aiProvider: agent.provider,
     aiCreditsLeft: agent.provider === "nvidia" ? meter.remaining : null,
+    host: process.env.RENDER ? { name: "render", service: process.env.RENDER_SERVICE_NAME ?? "", url: process.env.RENDER_EXTERNAL_URL ?? "" } : { name: "local" },
     currency: cfg.CURRENCY,
     audit: store.audit.verify(),
   });
@@ -265,6 +266,12 @@ app.post("/api/admin/reset", wrap(async (req, res) => {
   store.reset();
   seedDemo(store);
   res.json({ ok: true, requests: store.list().length });
+}));
+
+// Called on a schedule by the Render cron job (render.yaml: aeonith-hold-sweeper).
+app.post("/api/admin/sweep", wrap(async (req, res) => {
+  requireAdmin(req);
+  res.json(await app$.sweepHolds());
 }));
 
 app.post("/api/requests/:id/release", wrap(async (req, res) => {

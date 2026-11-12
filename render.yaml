@@ -7,6 +7,10 @@ services:
     buildCommand: npm ci && npm run build:sdk && npm run typecheck
     startCommand: npm start
     healthCheckPath: /api/health
+    disk: # keeps requests, Autopilot vault tokens and the audit chain across deploys
+      name: aeonith-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: "22"
@@ -46,3 +50,47 @@ services:
         sync: false
       - key: CHANNEL3_API_KEY
         sync: false
+
+  # A pro's own bidding agent, running independently and talking to Aeonith only through the
+  # APIMatic-generated SDK over Render's private network (the same way any outside seller would).
+  - type: worker
+    name: aeonith-seller-agent
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build:sdk
+    startCommand: npx tsx scripts/seller-agent.ts
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: AEONITH_HOSTPORT
+        fromService:
+          type: web
+          name: aeonith
+          property: hostport
+      - key: PROVIDER_ID
+        value: sdk-hill-country
+      - key: PROVIDER_NAME
+        value: Hill Country Plumbing
+
+  # PayPal holds are only guaranteed for 3 days: every 6 hours this job reauthorizes older holds and
+  # releases holds on requests that closed with no winner.
+  - type: cron
+    name: aeonith-hold-sweeper
+    runtime: node
+    plan: starter
+    schedule: "0 */6 * * *"
+    buildCommand: npm ci
+    startCommand: npx tsx scripts/sweep.ts
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: AEONITH_HOSTPORT
+        fromService:
+          type: web
+          name: aeonith
+          property: hostport
+      - key: ADMIN_TOKEN
+        fromService:
+          type: web
+          name: aeonith
+          envVarKey: ADMIN_TOKEN

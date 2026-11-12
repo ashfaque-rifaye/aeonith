@@ -425,6 +425,33 @@ export class Aeonith {
     b.authorizedAt = new Date().toISOString();
   }
 
+  /**
+   * Scheduled hold maintenance (a Render cron job calls POST /api/admin/sweep). PayPal guarantees an authorization's
+   * funds for 3 days: older live holds are reauthorized so a later capture is still backed. Requests whose window closed
+   * a day ago with no winner release their holds, so no buyer stays reserved for nothing.
+   */
+  async sweepHolds({ honorMs = 3 * 86400_000, graceMs = 86400_000 } = {}) {
+    const out = { checked: 0, reauthorized: 0, released: 0 };
+    for (const r of this.store.list()) {
+      const held = r.buyers.filter((b) => b.status === "held");
+      if (!held.length) continue;
+      if (["open", "bidding"].includes(r.status) && r.closesAt && Date.now() > Date.parse(r.closesAt) + graceMs) {
+        await this.releaseAll(r.id, "Window closed with no winner: released by the scheduled sweep").catch(() => {});
+        out.released += held.length;
+        continue;
+      }
+      for (const b of held) {
+        out.checked++;
+        const before = b.authorizationId;
+        await this.refreshHoldIfStale(r, b, honorMs).catch(() => {});
+        if (b.authorizationId !== before) out.reauthorized++;
+      }
+    }
+    this.log("scheduler", "holds.swept", out);
+    this.store.save();
+    return out;
+  }
+
   private async voidOne(r: JobRequest, b: BuyerHold, reason: string) {
     this.gate({ kind: "VOID", request: r, buyer: b }, r.id);
     await this.d.paypal.voidAuthorization(b.authorizationId!, `void-${b.authorizationId}`);

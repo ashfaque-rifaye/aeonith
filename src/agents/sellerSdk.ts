@@ -8,7 +8,7 @@ import type { DemandSignal, Offer as SdkOffer } from "aeonith-apilib";
 import { commitmentHash, newSalt } from "../core/commit.js";
 import type { Offer } from "../domain/types.js";
 
-export function offerProtocol(baseUrl = process.env.AEONITH_URL ?? "http://localhost:3000") {
+export function offerProtocol(baseUrl = process.env.AEONITH_URL ?? (process.env.AEONITH_HOSTPORT ? `http://${process.env.AEONITH_HOSTPORT}` : "http://localhost:3000")) {
   const client = new Client({ baseUrl, timeout: 30_000 });
   return new OfferProtocolApi(client);
 }

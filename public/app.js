@@ -136,7 +136,7 @@ function envPills() {
   const prov = health.aiProvider || (health.ai.startsWith("claude") ? "claude" : "offline");
   const aiTxt = prov === "nvidia" ? `NVIDIA Nemotron${health.aiCreditsLeft != null ? ` · ~${health.aiCreditsLeft} cr` : ""}` : prov === "claude" ? "Claude online" : "AI offline rules";
   return `<span class="chip ${pp ? "ok" : "warn"}">${ic("lock")}${pp ? "PayPal sandbox" : "PayPal simulated"}</span>
-    <a class="chip ${prov === "offline" ? "warn" : "violet"}" href="#/trust" title="${esc(health.ai)}">${ic("spark")}${esc(aiTxt)}</a>`;
+    <a class="chip ${prov === "offline" ? "warn" : "violet"}" href="#/trust" title="${esc(health.ai)}">${ic("spark")}${esc(aiTxt)}</a>${health.host?.name === "render" ? `<span class="chip render" id="render-pill" title="${esc(health.host.url)}">${ic("bolt")}Live on Render</span>` : ""}`;
 }
 
 // ---------- derived ----------
@@ -349,6 +349,7 @@ function viewJob(r) {
       ${r.mode === "together" ? peopleCard(r) : ""}
       ${bidsCard(r)}
       ${winnerCard(r)}
+      ${bookingCard(r)}
       ${liveCard(r)}
       ${proofCard(r)}
       ${payCard(r)}
@@ -673,6 +674,44 @@ function viewPros(signals) {
     <div class="codeblock">AEONITH_URL=… PROVIDER_ID=acme PROVIDER_NAME="Acme Plumbing" npm run mcp</div>
     <div class="chips" style="margin-top:10px"><span class="chip lime">list_open_requests</span><span class="chip lime">submit_sealed_bid</span><span class="chip lime">reveal_bid</span><span class="chip lime">get_result</span></div></div>`;
 }
+// ---------- the booking on the pro's calendar (Bryntum Scheduler) ----------
+function bookingCard(r) {
+  if (!r.award || r.catalog || unitOf(r) !== "home" || !(r.bookedAt || ["proving", "settled"].includes(r.status))) return "";
+  return `<div class="card fade-in" id="booking"><div class="card-head"><div><div class="eyebrow">${ic("clock", "inline")} Booked into the pro's calendar</div><h3 style="margin-top:6px">${esc(r.award.providerName)} · this week</h3></div><span class="chip ok">${ic("check")}slot held</span></div>
+    <p class="small muted" style="margin:0 0 10px">The sealed start time becomes a real slot on the pro's schedule, next to their other Aeonith jobs. If they miss it, the proof window fails and PayPal never captures.</p>
+    <div id="pro-sched" style="height:220px"></div></div>`;
+}
+let proSched = null;
+async function mountProSchedule(r) {
+  const el = $("#pro-sched");
+  if (!el) return;
+  const pid = r.award.providerId;
+  const events = requests.filter((x) => x.award?.providerId === pid && (x.bookedAt || ["proving", "settled"].includes(x.status) || x.id === r.id)).map((x) => {
+    const o = x.reveals.find((v) => v.offer.providerId === pid)?.offer;
+    return o && { id: x.id, resourceId: pid, name: x.id === r.id ? `${x.title} (this job)` : x.title, startDate: o.promises.startAt, endDate: new Date(Math.max(Date.parse(o.promises.endAt || 0), Date.parse(o.promises.startAt) + 5 * 3600_000)).toISOString(), eventColor: x.id === r.id ? "orange" : x.status === "settled" ? "green" : "gray" };
+  }).filter(Boolean);
+  try {
+    if (!document.querySelector("link[data-bryntum]")) {
+      const l = document.createElement("link");
+      l.rel = "stylesheet"; l.href = "/vendor/bryntum/svalbard-dark.css"; l.dataset.bryntum = "1";
+      document.head.append(l);
+    }
+    const { Scheduler } = await import("/vendor/bryntum/scheduler.module.js");
+    const t0 = Math.min(...events.map((e) => Date.parse(e.startDate))), t1 = Math.max(...events.map((e) => Date.parse(e.endDate)));
+    const start = new Date(t0 - 4 * 3600_000); start.setMinutes(0, 0, 0);
+    proSched?.destroy?.();
+    proSched = new Scheduler({
+      appendTo: el, timeZone: "America/Chicago", startDate: start, endDate: new Date(t1 + 4 * 3600_000),
+      viewPreset: { base: "hourAndDay", tickWidth: Math.max(36, (el.clientWidth - 200) / Math.ceil((t1 + 4 * 3600_000 - start.getTime()) / 10_800_000)), headers: [{ unit: "day", dateFormat: "ddd MMM D" }, { unit: "hour", increment: 3, dateFormat: "h A" }] },
+      rowHeight: 64, barMargin: 10, readOnly: true, height: 220,
+      columns: [{ text: "Pro", field: "name", width: innerWidth < 600 ? 110 : 170 }],
+      resources: [{ id: pid, name: r.award.providerName }], events,
+    });
+  } catch (e) {
+    el.innerHTML = `<div class="empty">Scheduler unavailable: ${esc(e.message)}</div>`;
+  }
+}
+
 async function mountScheduler() {
   const el = $("#scheduler");
   if (!el) return;
@@ -1273,9 +1312,10 @@ async function render({ animate = true } = {}) {
     if (r) {
       wireJob(r);
       mountBidGrid(r);
+      mountProSchedule(r);
       wireLive(r);
       const nx = nextAction(r);
-      if (ui.ringOn === r.id && nx?.id === "call") { ui.ringOn = null; setTimeout(() => openCall(r, nx.intent), 900); }
+      if (ui.ringOn === r.id && nx?.id === "call") { ui.ringOn = null; setTimeout(() => openCall(r, nx.intent), 2600); }
       const next = nextAction(r);
       if (next) {
         const bar = document.createElement("div");

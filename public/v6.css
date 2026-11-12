@@ -265,3 +265,4 @@
 :root[data-theme="light"] { --muted: #6f4f44; --ink-2: #3a2219; --line: rgba(80, 30, 15, .14); --line-2: rgba(80, 30, 15, .24); }
 :root[data-theme="light"] .benefit .big-n { color: #0f7a40; }
 :root[data-theme="light"] .callx.in { background: rgba(29, 11, 6, .35); }
+.chip.render { color: #fff; background: linear-gradient(135deg, #6c3bff, #8a5cff); border-color: rgba(190, 160, 255, .6); }
