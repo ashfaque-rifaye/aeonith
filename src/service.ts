@@ -263,9 +263,12 @@ export class Aeonith {
   }
 
   /** Deterministic clearing + advisory AI review of the winner's promises. */
-  async award(rid: unknown) {
+  async award(rid: unknown, { revealGraceMs = 3000 } = {}) {
     const r = this.req(rid);
     if (r.status !== "revealing") throw new HttpError(409, `Request is ${r.status}`);
+    // External agents (MCP / APIMatic SDK) reveal over HTTP after bidding closes: give them a short, bounded window.
+    const pending = () => r.commitments.some((c) => !r.reveals.some((v) => v.offer.providerId === c.providerId));
+    for (const t0 = Date.now(); pending() && Date.now() - t0 < revealGraceMs; ) await new Promise((ok) => setTimeout(ok, 150));
     const candidates = r.reveals
       .filter((v) => v.valid)
       .map((v) => ({
@@ -559,15 +562,13 @@ export class Aeonith {
     const lines: string[] = [];
     if (intent === "book") {
       lines.push(r.trigger
-        ? `Hi ${name}, it's your Aeonith agent. Your ${r.trigger.device.toLowerCase()} reported ${r.trigger.reading.toLowerCase()} at your ${r.trigger.location.toLowerCase()}.`
-        : `Hi ${name}, it's your Aeonith agent with the result for "${r.title}".`);
-      lines.push(`PayPal is holding $${fmt(held)} on your account. Nothing has been paid.`);
-      lines.push(`${r.commitments.length} pros sealed their bids. ${a.providerName} won at $${fmt(a.priceCents)}${promises ? `, licensed, with a ${promises.warrantyMonths}-month warranty` : ""}.`);
-      lines.push(`Say "approve" and I'll book them. You'll only be charged after photo proof.`);
+        ? `Hi ${name}, your ${r.trigger.device.toLowerCase()} found ${r.trigger.reading.toLowerCase().replace(/ detected/, "")} at the ${r.trigger.location.toLowerCase()}. PayPal is holding $${fmt(held)}, not paid.`
+        : `Hi ${name}, your quotes for "${r.title}" are in. PayPal is holding $${fmt(held)}, not paid.`);
+      lines.push(`${a.providerName} won ${r.commitments.length} sealed bids at $${fmt(a.priceCents)}${promises?.licensed ? ", licensed" : ""}.`);
+      lines.push(`Say "approve" to book them. You pay only after video proof.`);
     } else if (intent === "overcharge") {
-      lines.push(`Hi ${name}. ${a.providerName} finished, and the video proof passed.`);
-      lines.push(`They asked for $${fmt(pr?.amountCents ?? 0)}, but you booked them at $${fmt(charge)}. I blocked the extra $${fmt(pr?.overchargeCents ?? 0)}.`);
-      lines.push(`Say "pay the agreed price", and PayPal captures $${fmt(charge)}.`);
+      lines.push(`Hi ${name}. ${a.providerName} asked for $${fmt(pr?.amountCents ?? 0)}, but you booked them at $${fmt(charge)}. I blocked the extra $${fmt(pr?.overchargeCents ?? 0)}.`);
+      lines.push(`Say "pay the agreed price" to pay $${fmt(charge)}.`);
     } else {
       lines.push(`Hi ${name}, it's your Aeonith agent. ${a.providerName} says the job is done and asked to be paid.`);
       lines.push(r.proof?.verdict === "pass" ? `I checked their video: it was recorded live, and the work matches your job.` : `The proof needs your eyes: ${r.proof?.aiSummary ?? "please check the video"}.`);

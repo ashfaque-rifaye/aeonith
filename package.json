@@ -18,12 +18,19 @@
     "sandbox:check": "tsx scripts/sandbox-check.ts",
     "webhook:register": "tsx scripts/register-webhook.ts",
     "demo": "tsx scripts/demo.ts",
-    "nvidia:check": "tsx scripts/nvidia-check.ts"
+    "nvidia:check": "tsx scripts/nvidia-check.ts",
+    "build:sdk": "cd sdk/typescript && tsc -p tsconfig.esm.json && tsc -p tsconfig.cjs.json && node scripts/split-package-json.mjs",
+    "seller-agent": "tsx scripts/seller-agent.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",
+    "@apimatic/authentication-adapters": "^0.5.14",
+    "@apimatic/axios-client-adapter": "^0.3.21",
+    "@apimatic/core": "^0.10.30",
+    "@apimatic/schema": "^0.7.21",
     "@bryntum/scheduler": "npm:@bryntum/scheduler-trial@^7.3.8",
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "aeonith-apilib": "file:sdk/typescript",
     "ag-grid-enterprise": "36.2.0",
     "dotenv": "^16.4.7",
     "express": "^5.1.0",

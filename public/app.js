@@ -490,7 +490,7 @@ function bidsCard(r) {
     return `<div class="bid ${win ? "win" : r.award ? "out" : ""} ${isNew ? "arrive" : ""} ${rev && revealedNow ? "reveal-anim" : ""} ${win && revealedNow ? "win-late" : ""}" style="animation-delay:${delay}ms;${win && revealedNow ? `--win-delay:${n * 750 + 300}ms` : ""}">
       ${win ? `<span class="ribbon">WINNER</span>` : ""}
       <div class="head"><span class="avatar" style="background:${tint(c.providerName)}">${esc(initials(c.providerName))}</span>
-        <div style="min-width:0"><b>${esc(c.providerName)}</b><div class="small muted">${recruited ? "recruited by phone" : "AI agent"} · sealed ${hhmm(c.committedAt)}</div></div></div>
+        <div style="min-width:0"><b>${esc(c.providerName)}</b><div class="small muted">${recruited ? "recruited by phone" : c.providerId.startsWith("sdk-") ? "external agent · APIMatic SDK" : "AI agent"} · sealed ${hhmm(c.committedAt)}</div></div></div>
       ${!rev ? `<div class="sealed"><div class="lockrow">${ic("lock")}sealed · sha-256</div><div class="scramble" data-hash="${esc(c.hash)}">${esc(c.hash)}</div></div>`
         : `<div><span class="price">${o.discountBps ? `${(o.discountBps / 100).toFixed(1)}%<small> off every model</small>` : money(o.priceCents)}</span><span class="muted small">${o.minUnits > 1 ? ` · min ${o.minUnits} ${unitOf(r)}s` : ""}</span></div>
            <div class="chips">${o.promises.licensed ? `<span class="chip ok">${ic("shield")}${esc(o.promises.licenseNo)}</span>` : `<span class="chip bad">${ic("x")}unlicensed</span>`}
@@ -508,6 +508,21 @@ function bidsCard(r) {
     <div class="bids">${items}</div></div>`;
 }
 
+/** The customer benefit, in dollars, right where the winner is picked. */
+function benefitStrip(r) {
+  const a = r.award;
+  if (a.unitPrices) {
+    const rows = r.buyers.filter((b) => a.unitPrices[b.id]).map((b) => [b, r.catalog?.items.find((i) => i.id === b.itemId)?.msrpCents ?? a.unitPrices[b.id]]);
+    const saved = rows.reduce((s, [b, m]) => s + m - a.unitPrices[b.id], 0);
+    if (!saved) return "";
+    return `<div class="benefit"><span class="big-n">${usd0(saved)}</span><div><b>saved by ${rows.length} neighbours, together</b><small>${(a.discountBps / 100).toFixed(1)}% off every model, about ${usd0(Math.round(saved / rows.length / 100) * 100)} each. Deposits stay on hold until the dealer delivers.</small></div></div>`;
+  }
+  const quotes = r.reveals.filter((v) => v.valid).map((v) => v.offer.priceCents).filter(Boolean);
+  if (quotes.length < 2) return "";
+  const hi = Math.max(...quotes), avg = quotes.reduce((s, q) => s + q, 0) / quotes.length;
+  return `<div class="benefit"><span class="big-n">${usd0(hi - a.priceCents)}</span><div><b>less than the highest quote</b><small>${quotes.length} sealed quotes, average ${usd0(Math.round(avg / 100) * 100)}. You pay ${usd0(a.priceCents)}, only after video proof.</small></div></div>`;
+}
+
 function winnerCard(r) {
   if (!r.award) return "";
   const a = r.award;
@@ -521,6 +536,7 @@ function winnerCard(r) {
   }).join("")}</div>` : "";
   return `<div class="card fade-in" id="winner">
     <div class="card-head"><div><div class="eyebrow">Picked by code, not by AI</div><h3 style="margin-top:6px">${esc(a.providerName)} wins</h3></div><span class="win-price">${a.discountBps ? `${(a.discountBps / 100).toFixed(1)}% off` : money(a.priceCents)}</span></div>
+    ${benefitStrip(r)}
     <p style="margin:0 0 12px;color:var(--ink-2)">${esc(a.reason)}</p>
     ${perBuyer}
     ${rev ? `<div class="ai-panel"><div class="ai-h">${ic("spark")}<span>NVIDIA Nemotron · promise check</span><span class="chip ${rev.ok ? "ok" : "warn"}">${rev.ok ? "all promises match" : "check flags"}</span></div><p>${esc(rev.summary)}</p>${rev.flags.length ? `<ul>${rev.flags.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>` : ""}
@@ -963,7 +979,7 @@ async function openCall(r, intent) {
     try {
       const out = await post(`/api/requests/${r.id}/voice`, { intent, transcript, method });
       const ok = out.consent.approved;
-      await speak(ok ? (intent === "book" ? "Booked. I'll call you again when the proof is in." : intent === "overcharge" ? "Done. Overcharge flagged." : "Done. PayPal captured the payment and the pro is being paid.") : "Understood. Nothing moves until you say so.");
+      await speak(ok ? (intent === "book" ? "Booked." : intent === "overcharge" ? "Done. Overcharge flagged." : "Done. PayPal captured the payment and the pro is being paid.") : "Understood. Nothing moves until you say so.");
       el.querySelector("#cx-sub").innerHTML = `${ok ? "Approved" : "Declined"} · <span class="mono">sha256 ${out.consent.sha256.slice(0, 12)}…</span>`;
       toast(ok ? (intent === "book" ? "Booked by voice." : intent === "overcharge" ? "Agreed price paid. Overcharge refused and flagged." : "Released by voice: captured on PayPal and paid out.") : "Declined on the call. Nothing moved.");
     } catch (e) { toast(e.message, 6000); }

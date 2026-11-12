@@ -1,0 +1,396 @@
+openapi: 3.0.3
+info:
+  title: Aeonith API
+  version: 1.0.0
+  description: |
+    Aeonith pools buyers, lets seller agents bid blind (commit/reveal with SHA-256), and moves money only on PayPal:
+    holds (Orders v2 AUTHORIZE), capture or void (Payments v2), payouts (Payouts v1) and saved wallets (Vault v3).
+
+    Two audiences:
+    - **Offer Protocol** (`/protocol/v1`): what dealer and pro agents use to see demand and send sealed bids.
+      A demand signal never contains a buyer's private limit.
+    - **Buyer API** (`/api`): create requests, join pools, place PayPal holds, run Autopilot.
+  license:
+    name: MIT
+servers:
+  - url: "{baseUrl}"
+    description: Aeonith server (Render in production, localhost in development)
+    variables:
+      baseUrl:
+        default: https://aeonith.onrender.com
+        description: Base URL of the Aeonith server
+tags:
+  - name: Offer Protocol
+    description: Seller agents read demand and submit sealed bids.
+  - name: Requests
+    description: Buyer requests, pools and PayPal holds.
+  - name: Autopilot
+    description: PayPal Vault powered emergency jobs.
+paths:
+  /protocol/v1/requests:
+    get:
+      tags: [Offer Protocol]
+      operationId: listOpenDemand
+      summary: List requests that are open for sealed bids
+      responses:
+        "200":
+          description: Demand signals (no buyer limits, by construction)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DemandSignal" }
+  /protocol/v1/requests/{requestId}:
+    get:
+      tags: [Offer Protocol]
+      operationId: getDemand
+      summary: Get one demand signal
+      parameters: [{ $ref: "#/components/parameters/RequestId" }]
+      responses:
+        "200":
+          description: Demand signal
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DemandSignal" }
+  /protocol/v1/requests/{requestId}/commitments:
+    post:
+      tags: [Offer Protocol]
+      operationId: commitBid
+      summary: Seal a bid (send only its SHA-256 fingerprint)
+      description: hash = sha256(canonical JSON of the offer + salt). The offer itself is revealed later.
+      parameters: [{ $ref: "#/components/parameters/RequestId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CommitBody" }
+      responses:
+        "201":
+          description: Commitment recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Commitment" }
+        "409": { $ref: "#/components/responses/Error" }
+  /protocol/v1/requests/{requestId}/reveals:
+    post:
+      tags: [Offer Protocol]
+      operationId: revealBid
+      summary: Reveal a sealed bid; it must match its fingerprint
+      parameters: [{ $ref: "#/components/parameters/RequestId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RevealBody" }
+      responses:
+        "200":
+          description: Whether the reveal matched its commitment
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid: { type: boolean }
+                required: [valid]
+        "409": { $ref: "#/components/responses/Error" }
+  /protocol/v1/requests/{requestId}/result:
+    get:
+      tags: [Offer Protocol]
+      operationId: getResult
+      summary: The winner, picked by code
+      parameters: [{ $ref: "#/components/parameters/RequestId" }]
+      responses:
+        "200":
+          description: Result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Result" }
+  /api/requests:
+    get:
+      tags: [Requests]
+      operationId: listRequests
+      summary: List requests
+      responses:
+        "200":
+          description: Requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RequestSummary" }
+    post:
+      tags: [Requests]
+      operationId: createJobOrPool
+      summary: Create a request (a pool to buy together, or a job to hire a pro)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RequestSummary" }
+        "400": { $ref: "#/components/responses/Error" }
+  /api/requests/{requestId}:
+    get:
+      tags: [Requests]
+      operationId: getRequest
+      summary: Get a request with its buyers, bids, award and PayPal state
+      parameters: [{ $ref: "#/components/parameters/RequestId" }]
+      responses:
+        "200":
+          description: Request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RequestSummary" }
+  /api/requests/{requestId}/join:
+    post:
+      tags: [Requests]
+      operationId: joinPool
+      summary: Join a pool with a private max price
+      parameters: [{ $ref: "#/components/parameters/RequestId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, limitDollars]
+              properties:
+                name: { type: string, maxLength: 60 }
+                limitDollars: { type: number, description: "Private: never shown to sellers" }
+                units: { type: integer, minimum: 1, default: 1 }
+                itemId: { type: string, description: "Catalog item (e.g. a car model)" }
+      responses:
+        "200":
+          description: Buyer added (pending until the PayPal hold is approved)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Buyer" }
+  /api/requests/{requestId}/buyers/{buyerId}/hold:
+    post:
+      tags: [Requests]
+      operationId: createHold
+      summary: Create the PayPal order (intent AUTHORIZE) for a buyer's hold
+      parameters:
+        - { $ref: "#/components/parameters/RequestId" }
+        - { name: buyerId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: PayPal order; the buyer approves it in PayPal
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, description: PayPal order id }
+                  approveUrl: { type: string, format: uri }
+  /api/autopilot:
+    get:
+      tags: [Autopilot]
+      operationId: listAutopilots
+      summary: List Autopilots
+      responses:
+        "200":
+          description: Autopilots
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Autopilot" }
+    post:
+      tags: [Autopilot]
+      operationId: createAutopilot
+      summary: Save PayPal (Vault v3 setup token) with a budget per emergency job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [capDollars, categories]
+              properties:
+                buyerName: { type: string }
+                zip: { type: string }
+                capDollars: { type: number }
+                categories: { type: array, items: { type: string, enum: [plumbing, electrical, hvac] } }
+      responses:
+        "200":
+          description: Approve the setup token in PayPal
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  autopilot: { $ref: "#/components/schemas/Autopilot" }
+                  approveUrl: { type: string, format: uri }
+  /api/autopilot/{autopilotId}/sensor:
+    post:
+      tags: [Autopilot]
+      operationId: sensorAlert
+      summary: A home sensor files and funds a job (hold on the vaulted wallet, no redirect)
+      parameters:
+        - { name: autopilotId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device, location, reading]
+              properties:
+                device: { type: string, example: Leak sensor }
+                location: { type: string, example: Garage water heater }
+                reading: { type: string, example: Water detected on the floor }
+      responses:
+        "200":
+          description: The filed job, already funded and bid on
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RequestSummary" }
+components:
+  parameters:
+    RequestId:
+      name: requestId
+      in: path
+      required: true
+      schema: { type: string, example: req_1601d47f }
+  responses:
+    Error:
+      description: Refused (policy gate, state or validation)
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+  schemas:
+    Requirements:
+      type: object
+      properties:
+        licensed: { type: boolean }
+        minWarrantyMonths: { type: integer }
+        completeBy: { type: string, description: "YYYY-MM-DD, end of day US Central" }
+    CatalogItem:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        msrpCents: { type: integer }
+        units: { type: integer }
+    DemandSignal:
+      type: object
+      required: [requestId, mode, title, category, fundedUnits, status]
+      properties:
+        requestId: { type: string }
+        mode: { type: string, enum: [solo, group] }
+        title: { type: string }
+        category: { type: string }
+        description: { type: string }
+        zip: { type: string }
+        requirements: { $ref: "#/components/schemas/Requirements" }
+        depositPerUnitCents: { type: integer, nullable: true }
+        fundedUnits: { type: integer, description: Units backed by a PayPal hold }
+        fundedRequests: { type: integer }
+        closesAt: { type: string, format: date-time }
+        status: { type: string }
+        catalog:
+          type: object
+          properties:
+            seller: { type: string }
+            items: { type: array, items: { $ref: "#/components/schemas/CatalogItem" } }
+    Promises:
+      type: object
+      required: [licensed, warrantyMonths, startAt]
+      properties:
+        licensed: { type: boolean }
+        licenseNo: { type: string }
+        warrantyMonths: { type: integer }
+        startAt: { type: string, format: date-time }
+        endAt: { type: string, format: date-time }
+    Offer:
+      type: object
+      required: [requestId, providerId, priceCents, minUnits, promises]
+      properties:
+        requestId: { type: string }
+        providerId: { type: string }
+        priceCents: { type: integer, maximum: 10000000 }
+        minUnits: { type: integer, minimum: 1 }
+        discountBps: { type: integer, description: "Fleet discount off MSRP on every model (catalog pools)" }
+        promises: { $ref: "#/components/schemas/Promises" }
+    CommitBody:
+      type: object
+      required: [providerId, providerName, hash]
+      properties:
+        providerId: { type: string }
+        providerName: { type: string }
+        hash: { type: string, pattern: "^[0-9a-f]{64}$" }
+    Commitment:
+      type: object
+      properties:
+        providerId: { type: string }
+        providerName: { type: string }
+        hash: { type: string }
+        committedAt: { type: string, format: date-time }
+    RevealBody:
+      type: object
+      required: [offer, salt]
+      properties:
+        offer: { $ref: "#/components/schemas/Offer" }
+        salt: { type: string, pattern: "^[0-9a-f]{32,128}$" }
+        pitch: { type: string, maxLength: 600 }
+    Result:
+      type: object
+      properties:
+        status: { type: string }
+        winner:
+          type: object
+          nullable: true
+          properties:
+            providerId: { type: string }
+            priceCents: { type: integer }
+            unitsServed: { type: integer }
+    Buyer:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        units: { type: integer }
+        status: { type: string, enum: [pending, held, captured, voided, released] }
+        authorizationId: { type: string, description: PayPal authorization id }
+    CreateRequest:
+      type: object
+      required: [title, category]
+      properties:
+        mode: { type: string, enum: [solo, group] }
+        flow: { type: string, enum: [quotes], description: "quotes = sealed quotes first, hold on booking" }
+        title: { type: string }
+        category: { type: string }
+        description: { type: string }
+        zip: { type: string }
+        licensed: { type: boolean }
+        minWarrantyMonths: { type: integer }
+        completeBy: { type: string }
+        buyerName: { type: string }
+        limitDollars: { type: number }
+        depositDollars: { type: number }
+    RequestSummary:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        status: { type: string }
+        mode: { type: string }
+        buyers: { type: array, items: { $ref: "#/components/schemas/Buyer" } }
+    Autopilot:
+      type: object
+      properties:
+        id: { type: string }
+        buyerName: { type: string }
+        capCents: { type: integer }
+        categories: { type: array, items: { type: string } }
+        status: { type: string, enum: [pending, active, revoked] }
+        vaultId: { type: string, description: PayPal Vault payment token }

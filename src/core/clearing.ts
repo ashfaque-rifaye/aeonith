@@ -1,5 +1,8 @@
 import type { Award, BuyerHold, CatalogItem, Cents, Offer, Requirements } from "../domain/types.js";
 
+/** "By Friday" (a bare date) means by the end of that day in Austin, not midnight UTC at its start. */
+export const deadlineMs = (d: string) => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? Date.parse(`${d}T23:59:59-06:00`) : Date.parse(d));
+
 /**
  * Deterministic clearing. No AI here.
  *
@@ -25,7 +28,7 @@ export function meetsRequirements(offer: Offer, req: Requirements): string | nul
   if (req.licensed && !offer.promises.licensed) return "not licensed (licence required)";
   if (offer.promises.warrantyMonths < req.minWarrantyMonths)
     return `warranty ${offer.promises.warrantyMonths} mo < required ${req.minWarrantyMonths} mo`;
-  if (req.completeBy && Date.parse(offer.promises.startAt) > Date.parse(req.completeBy)) return "can't start before the deadline";
+  if (req.completeBy && Date.parse(offer.promises.startAt) > deadlineMs(req.completeBy)) return "can't start before the deadline";
   if (!(offer.priceCents > 0) || !Number.isInteger(offer.priceCents)) return "invalid price";
   if (!(offer.minUnits >= 1) || !Number.isInteger(offer.minUnits)) return "invalid minimum units";
   return null;
