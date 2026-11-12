@@ -963,7 +963,7 @@ async function openCall(r, intent) {
     try {
       const out = await post(`/api/requests/${r.id}/voice`, { intent, transcript, method });
       const ok = out.consent.approved;
-      await speak(ok ? (intent === "book" ? "Booked. I'll call you again when the proof is in." : intent === "overcharge" ? "Done. Only the sealed price was captured, and the overcharge is flagged." : "Done. PayPal captured the payment and the pro is being paid.") : "Understood. Nothing moves until you say so.");
+      await speak(ok ? (intent === "book" ? "Booked. I'll call you again when the proof is in." : intent === "overcharge" ? "Done. Overcharge flagged." : "Done. PayPal captured the payment and the pro is being paid.") : "Understood. Nothing moves until you say so.");
       el.querySelector("#cx-sub").innerHTML = `${ok ? "Approved" : "Declined"} · <span class="mono">sha256 ${out.consent.sha256.slice(0, 12)}…</span>`;
       toast(ok ? (intent === "book" ? "Booked by voice." : intent === "overcharge" ? "Agreed price paid. Overcharge refused and flagged." : "Released by voice: captured on PayPal and paid out.") : "Declined on the call. Nothing moved.");
     } catch (e) { toast(e.message, 6000); }
@@ -1380,8 +1380,9 @@ async function recruitLive(r, btn) {
     box.innerHTML = `<div class="lc-h"><span class="lc-dot"></span><b>Calling ${esc(c.party)}</b><span class="mono small muted">${esc(c.phone || "")}</span><span class="chip">2× speed</span></div><div class="bubbles"></div>`;
     host.append(box);
     const bub = box.querySelector(".bubbles");
-    const fast = calls.indexOf(c) > 0;
-    for (const l of c.lines) {
+    const fastCall = calls.indexOf(c) > 0;
+    for (const [li, l] of c.lines.entries()) {
+      const fast = fastCall || li >= 4;
       if (fast) { const d = document.createElement("div"); d.className = `bub ${l.who}`; d.innerHTML = `<small>${l.who === "agent" ? "Aeonith agent" : esc(c.party)}</small>${esc(l.text)}`; bub.append(d); continue; }
       const d = document.createElement("div");
       d.className = `bub ${l.who} typing`;
